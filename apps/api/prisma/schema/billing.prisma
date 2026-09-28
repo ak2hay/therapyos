@@ -1,0 +1,525 @@
+model Package {
+  id           String       @id @default(cuid())
+  tenantId     String
+  name         String
+  description  String?
+  validityDays Int
+  price        Decimal      @db.Decimal(12, 2)
+  taxRate      Decimal      @default(0) @db.Decimal(5, 2)
+  status       RecordStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  items        PackageItem[]
+  customerPackages CustomerPackage[]
+
+  @@index([tenantId, status])
+  @@map("packages")
+}
+
+model PackageItem {
+  id        String  @id @default(cuid())
+  packageId String
+  serviceId String
+  quantity  Int
+  package   Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([packageId, serviceId])
+  @@map("package_items")
+}
+
+enum CustomerPackageStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  CANCELLED
+}
+
+model CustomerPackage {
+  id                String                @id @default(cuid())
+  tenantId          String
+  customerId        String
+  packageId         String
+  branchId          String?
+  purchaseInvoiceId String?
+  purchasedAt       DateTime              @default(now())
+  expiresAt         DateTime
+  status            CustomerPackageStatus @default(PENDING_PAYMENT)
+  expiryReminderAt  DateTime?
+  createdAt         DateTime              @default(now())
+  customer          Customer              @relation(fields: [customerId], references: [id])
+  package           Package               @relation(fields: [packageId], references: [id])
+  items             CustomerPackageItem[]
+  redemptions       PackageRedemption[]
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, status, expiresAt])
+  @@map("customer_packages")
+}
+
+model CustomerPackageItem {
+  id                String          @id @default(cuid())
+  customerPackageId String
+  serviceId         String
+  totalQuantity     Int
+  usedQuantity      Int             @default(0)
+  customerPackage   CustomerPackage @relation(fields: [customerPackageId], references: [id], onDelete: Cascade)
+  service           Service         @relation(fields: [serviceId], references: [id])
+
+  @@unique([customerPackageId, serviceId])
+  @@map("customer_package_items")
+}
+
+model PackageRedemption {
+  id                    String          @id @default(cuid())
+  tenantId              String
+  branchId              String
+  customerPackageId     String
+  customerPackageItemId String
+  sessionId             String?
+  serviceId             String
+  quantity              Int
+  redeemedBy            String?
+  redeemedAt            DateTime        @default(now())
+  reversedAt            DateTime?
+  customerPackage       CustomerPackage @relation(fields: [customerPackageId], references: [id])
+
+  @@index([tenantId, redeemedAt])
+  @@index([sessionId])
+  @@map("package_redemptions")
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+  ONE_TIME
+}
+
+model MembershipPlan {
+  id              String                  @id @default(cuid())
+  tenantId        String
+  name            String
+  description     String?
+  price           Decimal                 @db.Decimal(12, 2)
+  taxRate         Decimal                 @default(0) @db.Decimal(5, 2)
+  billingInterval BillingInterval         @default(MONTHLY)
+  durationDays    Int
+  status          RecordStatus            @default(ACTIVE)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  benefits        MembershipPlanBenefit[]
+  memberships     CustomerMembership[]
+
+  @@index([tenantId, status])
+  @@map("membership_plans")
+}
+
+enum MembershipBenefitType {
+  SERVICE_DISCOUNT_PERCENT
+  PRODUCT_DISCOUNT_PERCENT
+  INCLUDED_SESSIONS
+  PRIORITY_BOOKING
+}
+
+model MembershipPlanBenefit {
+  id         String                @id @default(cuid())
+  planId     String
+  type       MembershipBenefitType
+  serviceId  String?
+  categoryId String?
+  value      Decimal               @default(0) @db.Decimal(12, 2)
+  quantity   Int?
+  plan       MembershipPlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("membership_plan_benefits")
+}
+
+enum CustomerMembershipStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model CustomerMembership {
+  id                String                   @id @default(cuid())
+  tenantId          String
+  customerId        String
+  membershipPlanId  String
+  branchId          String?
+  purchaseInvoiceId String?
+  startedAt         DateTime
+  expiresAt         DateTime
+  autoRenew         Boolean                  @default(false)
+  status            CustomerMembershipStatus @default(PENDING_PAYMENT)
+  cancelledAt       DateTime?
+  renewedFromId     String?
+  expiryReminderAt  DateTime?
+  createdAt         DateTime                 @default(now())
+  customer          Customer                 @relation(fields: [customerId], references: [id])
+  plan              MembershipPlan           @relation(fields: [membershipPlanId], references: [id])
+  usages            MembershipUsage[]
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, status, expiresAt])
+  @@map("customer_memberships")
+}
+
+model MembershipUsage {
+  id                   String             @id @default(cuid())
+  tenantId             String
+  customerMembershipId String
+  benefitId            String
+  sessionId            String?
+  invoiceId            String?
+  quantity             Int                @default(1)
+  usedAt               DateTime           @default(now())
+  membership           CustomerMembership @relation(fields: [customerMembershipId], references: [id], onDelete: Cascade)
+
+  @@index([customerMembershipId, benefitId])
+  @@map("membership_usages")
+}
+
+enum OfferType {
+  PERCENTAGE
+  FIXED
+  BUY_ONE_GET_ONE
+  PACKAGE_BONUS
+  MEMBERSHIP_BONUS
+}
+
+enum OfferAppliesTo {
+  ALL
+  SERVICE
+  CATEGORY
+  PRODUCT
+  PACKAGE
+  MEMBERSHIP
+}
+
+model Offer {
+  id          String         @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  offerType   OfferType
+  value       Decimal        @db.Decimal(12, 2)
+  appliesTo   OfferAppliesTo @default(ALL)
+  targetIds   String[]       @default([])
+  branchIds   String[]       @default([])
+  minOrder    Decimal?       @db.Decimal(12, 2)
+  startDate   DateTime       @db.Date
+  endDate     DateTime       @db.Date
+  autoApply   Boolean        @default(true)
+  status      RecordStatus   @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([tenantId, status, startDate, endDate])
+  @@map("offers")
+}
+
+model OfferRedemption {
+  id             String   @id @default(cuid())
+  tenantId       String
+  offerId        String
+  invoiceId      String
+  customerId     String?
+  discountAmount Decimal  @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, offerId])
+  @@map("offer_redemptions")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+model Coupon {
+  id               String       @id @default(cuid())
+  tenantId         String
+  code             String
+  description      String?
+  discountType     DiscountType
+  discountValue    Decimal      @db.Decimal(12, 2)
+  minimumOrder     Decimal?     @db.Decimal(12, 2)
+  maximumDiscount  Decimal?     @db.Decimal(12, 2)
+  usageLimit       Int?
+  perCustomerLimit Int?
+  usedCount        Int          @default(0)
+  startDate        DateTime     @db.Date
+  endDate          DateTime     @db.Date
+  status           RecordStatus @default(ACTIVE)
+  campaignId       String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([tenantId, code])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id             String   @id @default(cuid())
+  tenantId       String
+  couponId       String
+  customerId     String?
+  invoiceId      String
+  discountAmount Decimal  @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, couponId, customerId])
+  @@map("coupon_redemptions")
+}
+
+enum ItemType {
+  SERVICE
+  PRODUCT
+  PACKAGE
+  MEMBERSHIP
+}
+
+enum CartStatus {
+  OPEN
+  CHECKED_OUT
+  ABANDONED
+}
+
+model Cart {
+  id         String     @id @default(cuid())
+  tenantId   String
+  branchId   String
+  customerId String?
+  status     CartStatus @default(OPEN)
+  couponCode String?
+  createdBy  String?
+  invoiceId  String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  items      CartItem[]
+
+  @@index([tenantId, branchId, status])
+  @@map("carts")
+}
+
+model CartItem {
+  id                   String   @id @default(cuid())
+  cartId               String
+  itemType             ItemType
+  itemId               String
+  name                 String
+  quantity             Int      @default(1)
+  unitPrice            Decimal  @db.Decimal(12, 2)
+  manualDiscount       Decimal  @default(0) @db.Decimal(12, 2)
+  therapistId          String?
+  sessionId            String?
+  customerPackageId    String?
+  customerMembershipId String?
+  createdAt            DateTime @default(now())
+  cart                 Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@map("cart_items")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  tenantId       String
+  branchId       String
+  customerId     String?
+  invoiceNumber  String
+  subtotal       Decimal       @db.Decimal(12, 2)
+  discount       Decimal       @default(0) @db.Decimal(12, 2)
+  tax            Decimal       @default(0) @db.Decimal(12, 2)
+  rounding       Decimal       @default(0) @db.Decimal(12, 2)
+  total          Decimal       @db.Decimal(12, 2)
+  amountPaid     Decimal       @default(0) @db.Decimal(12, 2)
+  amountRefunded Decimal       @default(0) @db.Decimal(12, 2)
+  currency       String        @default("INR")
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?
+  paidAt         DateTime?
+  notes          String?
+  couponId       String?
+  cartId         String?
+  pdfKey         String?
+  createdBy      String?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  branch   Branch        @relation(fields: [branchId], references: [id])
+  customer Customer?     @relation(fields: [customerId], references: [id])
+  items    InvoiceItem[]
+  payments Payment[]
+  refunds  Refund[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, branchId, createdAt])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id                   String   @id @default(cuid())
+  invoiceId            String
+  itemType             ItemType
+  itemId               String
+  description          String
+  quantity             Int
+  unitPrice            Decimal  @db.Decimal(12, 2)
+  discount             Decimal  @default(0) @db.Decimal(12, 2)
+  taxRate              Decimal  @default(0) @db.Decimal(5, 2)
+  tax                  Decimal  @default(0) @db.Decimal(12, 2)
+  total                Decimal  @db.Decimal(12, 2)
+  therapistId          String?
+  sessionId            String?
+  customerPackageId    String?
+  customerMembershipId String?
+  meta                 Json?
+  invoice              Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([itemType, itemId])
+  @@map("invoice_items")
+}
+
+model InvoiceSequence {
+  id         String @id @default(cuid())
+  tenantId   String
+  branchId   String
+  prefix     String
+  nextNumber Int    @default(1)
+
+  @@unique([tenantId, branchId, prefix])
+  @@map("invoice_sequences")
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  RAZORPAY
+  BANK_TRANSFER
+  PACKAGE
+  MEMBERSHIP
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+model Payment {
+  id                    String        @id @default(cuid())
+  tenantId              String
+  branchId              String
+  invoiceId             String
+  customerId            String?
+  amount                Decimal       @db.Decimal(12, 2)
+  refundedAmount        Decimal       @default(0) @db.Decimal(12, 2)
+  method                PaymentMethod
+  provider              String?
+  providerOrderId       String?
+  providerTransactionId String?
+  status                PaymentStatus @default(PENDING)
+  reference             String?
+  notes                 String?
+  receivedBy            String?
+  paidAt                DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  branch  Branch   @relation(fields: [branchId], references: [id])
+  invoice Invoice  @relation(fields: [invoiceId], references: [id])
+  refunds Refund[]
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, invoiceId])
+  @@index([providerOrderId])
+  @@map("payments")
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+model Refund {
+  id               String       @id @default(cuid())
+  tenantId         String
+  branchId         String
+  paymentId        String
+  invoiceId        String
+  amount           Decimal      @db.Decimal(12, 2)
+  reason           String
+  status           RefundStatus @default(PENDING)
+  providerRefundId String?
+  createdBy        String?
+  createdAt        DateTime     @default(now())
+  payment          Payment      @relation(fields: [paymentId], references: [id])
+  invoice          Invoice      @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@map("refunds")
+}
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+model LedgerAccount {
+  id       String            @id @default(cuid())
+  tenantId String
+  code     String
+  name     String
+  type     LedgerAccountType
+  entries  LedgerEntry[]
+
+  @@unique([tenantId, code])
+  @@map("ledger_accounts")
+}
+
+model LedgerEntry {
+  id            String        @id @default(cuid())
+  tenantId      String
+  branchId      String?
+  journalId     String
+  accountId     String
+  debit         Decimal       @default(0) @db.Decimal(12, 2)
+  credit        Decimal       @default(0) @db.Decimal(12, 2)
+  referenceType String
+  referenceId   String
+  description   String?
+  entryDate     DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  account       LedgerAccount @relation(fields: [accountId], references: [id])
+
+  @@index([tenantId, entryDate])
+  @@index([tenantId, referenceType, referenceId])
+  @@index([journalId])
+  @@map("ledger_entries")
+}

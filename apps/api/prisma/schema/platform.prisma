@@ -1,0 +1,411 @@
+enum TenantStatus {
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum BusinessType {
+  AYURVEDA
+  MASSAGE
+  WELLNESS
+  PHYSIOTHERAPY
+  FOOT_THERAPY
+  ALTERNATIVE_THERAPY
+  OTHER
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum PlatformRole {
+  SUPER_ADMIN
+  SUPPORT
+}
+
+model Tenant {
+  id                    String        @id @default(cuid())
+  name                  String
+  legalName             String?
+  slug                  String        @unique
+  logoUrl               String?
+  phone                 String?
+  email                 String?
+  address               String?
+  taxId                 String?
+  timezone              String        @default("Asia/Kolkata")
+  currency              String        @default("INR")
+  country               String        @default("IN")
+  businessType          BusinessType  @default(OTHER)
+  status                TenantStatus  @default(ONBOARDING)
+  onboardingStep        Int           @default(1)
+  onboardingData        Json?
+  onboardingCompletedAt DateTime?
+  subscriptionPlanId    String?
+  suspendedReason       String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  branches              Branch[]
+  users                 User[]
+  subscriptionPlan      SubscriptionPlan? @relation(fields: [subscriptionPlanId], references: [id])
+
+  @@map("tenants")
+}
+
+model Branch {
+  id                   String       @id @default(cuid())
+  tenantId             String
+  tenant               Tenant       @relation(fields: [tenantId], references: [id])
+  name                 String
+  code                 String
+  phone                String?
+  email                String?
+  address              String?
+  city                 String?
+  state                String?
+  pincode              String?
+  latitude             Decimal?     @db.Decimal(10, 7)
+  longitude            Decimal?     @db.Decimal(10, 7)
+  timezone             String?
+  openingTime          String       @default("09:00")
+  closingTime          String       @default("21:00")
+  status               RecordStatus @default(ACTIVE)
+  publicBookingEnabled Boolean      @default(true)
+  googleReviewUrl      String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  userRoles        UserRole[]
+  branchServices   BranchService[]
+  appointments     Appointment[]
+  queueEntries     QueueEntry[]
+  sessions         TherapySession[]
+  invoices         Invoice[]
+  payments         Payment[]
+  stock            InventoryStock[]
+  expenses         Expense[]
+  franchiseBranch  FranchiseBranch?
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("branches")
+}
+
+model User {
+  id                 String     @id @default(cuid())
+  tenantId           String
+  tenant             Tenant     @relation(fields: [tenantId], references: [id])
+  name               String
+  phone              String?
+  email              String?
+  passwordHash       String?
+  googleId           String?
+  avatarUrl          String?
+  status             UserStatus @default(ACTIVE)
+  permissionsVersion Int        @default(1)
+  inviteTokenHash    String?    @unique
+  inviteExpiresAt    DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  userRoles     UserRole[]
+  refreshTokens RefreshToken[]
+  therapist     Therapist?
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, phone])
+  @@index([email])
+  @@index([phone])
+  @@map("users")
+}
+
+model Role {
+  id              String           @id @default(cuid())
+  tenantId        String
+  key             String?
+  name            String
+  description     String?
+  isSystem        Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  module          String
+  description     String?
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id       String  @id @default(cuid())
+  tenantId String
+  userId   String
+  roleId   String
+  branchId String?
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, branchId])
+  @@index([tenantId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id              String         @id @default(cuid())
+  userId          String?
+  platformAdminId String?
+  user            User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platformAdmin   PlatformAdmin? @relation(fields: [platformAdminId], references: [id], onDelete: Cascade)
+  customerId      String?
+  customer        Customer?      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tokenHash       String         @unique
+  familyId        String
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  replacedById    String?
+  ip              String?
+  userAgent       String?
+  createdAt       DateTime       @default(now())
+
+  @@index([familyId])
+  @@index([customerId])
+  @@map("refresh_tokens")
+}
+
+model PlatformAdmin {
+  id            String         @id @default(cuid())
+  name          String
+  email         String         @unique
+  passwordHash  String
+  role          PlatformRole   @default(SUPER_ADMIN)
+  status        UserStatus     @default(ACTIVE)
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  refreshTokens RefreshToken[]
+
+  @@map("platform_admins")
+}
+
+model TenantSetting {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+  @@map("tenant_settings")
+}
+
+model FeatureFlag {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  key       String
+  enabled   Boolean  @default(false)
+  config    Json?
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+  @@map("feature_flags")
+}
+
+enum TaxType {
+  GST
+  VAT
+  SALES_TAX
+  OTHER
+}
+
+model TaxRate {
+  id            String       @id @default(cuid())
+  tenantId      String
+  name          String
+  rate          Decimal      @db.Decimal(5, 2)
+  type          TaxType      @default(GST)
+  isInclusive   Boolean      @default(false)
+  isDefault     Boolean      @default(false)
+  effectiveFrom DateTime     @default(now()) @db.Date
+  effectiveTo   DateTime?    @db.Date
+  status        RecordStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+
+  @@index([tenantId])
+  @@map("tax_rates")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  userId     String?
+  actorType  String   @default("USER")
+  action     String
+  entityType String
+  entityId   String?
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?
+  userAgent  String?
+  requestId  String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@map("audit_logs")
+}
+
+enum DomainEventStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model DomainEvent {
+  id          String            @id @default(cuid())
+  tenantId    String?
+  type        String
+  payload     Json
+  status      DomainEventStatus @default(PENDING)
+  attempts    Int               @default(0)
+  error       String?
+  createdAt   DateTime          @default(now())
+  publishedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([tenantId, type])
+  @@map("domain_events")
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  prefix     String
+  keyHash    String    @unique
+  scopes     String[]
+  createdBy  String?
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+model TenantBranding {
+  id                  String   @id @default(cuid())
+  tenantId            String   @unique
+  appName             String?
+  primaryColor        String?
+  accentColor         String?
+  logoUrl             String?
+  customDomain        String?  @unique
+  emailSenderName     String?
+  emailSenderAddress  String?
+  whatsappDisplayName String?
+  invoiceFooter       String?
+  poweredBy           Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
+
+  @@map("tenant_branding")
+}
+
+model FileObject {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  key         String   @unique
+  contentType String
+  size        Int
+  purpose     String
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("files")
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model SupportTicket {
+  id                String                 @id @default(cuid())
+  tenantId          String
+  createdByUserId   String?
+  subject           String
+  description       String
+  priority          TicketPriority         @default(MEDIUM)
+  status            TicketStatus           @default(OPEN)
+  assignedToAdminId String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  messages          SupportTicketMessage[]
+
+  @@index([tenantId, status])
+  @@index([status])
+  @@map("support_tickets")
+}
+
+model SupportTicketMessage {
+  id         String        @id @default(cuid())
+  tenantId   String
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorType String
+  authorId   String?
+  authorName String?
+  body       String
+  createdAt  DateTime      @default(now())
+
+  @@index([ticketId])
+  @@map("support_ticket_messages")
+}
+
+model AiQuery {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String?
+  question  String
+  answer    String
+  metrics   Json?
+  provider  String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@map("ai_queries")
+}

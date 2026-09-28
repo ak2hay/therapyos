@@ -1,0 +1,187 @@
+model FranchiseGroup {
+  id          String       @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  status      RecordStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now())
+  franchisees Franchisee[]
+
+  @@index([tenantId])
+  @@map("franchise_groups")
+}
+
+model Franchisee {
+  id               String              @id @default(cuid())
+  tenantId         String
+  franchiseGroupId String
+  name             String
+  ownerName        String
+  email            String?
+  phone            String?
+  userId           String?
+  status           RecordStatus        @default(ACTIVE)
+  createdAt        DateTime            @default(now())
+  group            FranchiseGroup      @relation(fields: [franchiseGroupId], references: [id])
+  contracts        FranchiseContract[]
+  branches         FranchiseBranch[]
+  fees             FranchiseFee[]
+
+  @@index([tenantId])
+  @@map("franchisees")
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  TERMINATED
+  EXPIRED
+}
+
+model FranchiseContract {
+  id                  String         @id @default(cuid())
+  tenantId            String
+  franchiseeId        String
+  startDate           DateTime       @db.Date
+  endDate             DateTime?      @db.Date
+  royaltyPercent      Decimal        @default(0) @db.Decimal(5, 2)
+  marketingFeePercent Decimal        @default(0) @db.Decimal(5, 2)
+  fixedMonthlyFee     Decimal        @default(0) @db.Decimal(12, 2)
+  franchiseFee        Decimal        @default(0) @db.Decimal(12, 2)
+  terms               String?
+  status              ContractStatus @default(ACTIVE)
+  createdAt           DateTime       @default(now())
+  franchisee          Franchisee     @relation(fields: [franchiseeId], references: [id], onDelete: Cascade)
+  fees                FranchiseFee[]
+
+  @@index([tenantId, franchiseeId])
+  @@map("franchise_contracts")
+}
+
+model FranchiseBranch {
+  id           String     @id @default(cuid())
+  tenantId     String
+  franchiseeId String
+  branchId     String     @unique
+  assignedAt   DateTime   @default(now())
+  franchisee   Franchisee @relation(fields: [franchiseeId], references: [id], onDelete: Cascade)
+  branch       Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@map("franchise_branches")
+}
+
+enum FranchiseFeeType {
+  ROYALTY
+  MARKETING
+  FIXED
+  FRANCHISE_FEE
+}
+
+enum FranchiseFeeStatus {
+  DUE
+  PAID
+  WAIVED
+}
+
+model FranchiseFee {
+  id           String             @id @default(cuid())
+  tenantId     String
+  franchiseeId String
+  contractId   String
+  type         FranchiseFeeType
+  periodStart  DateTime           @db.Date
+  periodEnd    DateTime           @db.Date
+  grossRevenue Decimal            @default(0) @db.Decimal(14, 2)
+  amount       Decimal            @db.Decimal(12, 2)
+  status       FranchiseFeeStatus @default(DUE)
+  dueDate      DateTime           @db.Date
+  paidAt       DateTime?
+  createdAt    DateTime           @default(now())
+  franchisee   Franchisee         @relation(fields: [franchiseeId], references: [id], onDelete: Cascade)
+  contract     FranchiseContract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@unique([contractId, type, periodStart])
+  @@index([tenantId, status])
+  @@map("franchise_fees")
+}
+
+model SubscriptionPlan {
+  id           String       @id @default(cuid())
+  code         String       @unique
+  name         String
+  description  String?
+  monthlyPrice Decimal      @db.Decimal(12, 2)
+  annualPrice  Decimal      @db.Decimal(12, 2)
+  maxBranches  Int
+  maxUsers     Int
+  maxCustomers Int
+  features     String[]     @default([])
+  status       RecordStatus @default(ACTIVE)
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  tenants      Tenant[]
+  subscriptions TenantSubscription[]
+
+  @@map("subscription_plans")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+model TenantSubscription {
+  id                     String               @id @default(cuid())
+  tenantId               String
+  planId                 String
+  status                 SubscriptionStatus   @default(TRIALING)
+  billingCycle           BillingCycle         @default(MONTHLY)
+  startDate              DateTime             @default(now())
+  renewalDate            DateTime?
+  trialEndDate           DateTime?
+  cancelledAt            DateTime?
+  provider               String?
+  providerSubscriptionId String?
+  isCurrent              Boolean              @default(true)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  plan                   SubscriptionPlan     @relation(fields: [planId], references: [id])
+  invoices               SubscriptionInvoice[]
+
+  @@index([tenantId, isCurrent])
+  @@index([status, renewalDate])
+  @@map("tenant_subscriptions")
+}
+
+enum SubscriptionInvoiceStatus {
+  DUE
+  PAID
+  FAILED
+  VOID
+}
+
+model SubscriptionInvoice {
+  id                String                    @id @default(cuid())
+  tenantId          String
+  subscriptionId    String
+  amount            Decimal                   @db.Decimal(12, 2)
+  status            SubscriptionInvoiceStatus @default(DUE)
+  periodStart       DateTime
+  periodEnd         DateTime
+  providerPaymentId String?
+  paidAt            DateTime?
+  createdAt         DateTime                  @default(now())
+  subscription      TenantSubscription        @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("subscription_invoices")
+}

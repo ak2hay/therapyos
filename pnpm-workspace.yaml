@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  prisma: true
+  '@prisma/client': true
+  '@prisma/engines': true
+  '@nestjs/core': true
+  '@swc/core': true
+  esbuild: true
+  sharp: true
+  msgpackr-extract: true
+  unrs-resolver: true
+  '@parcel/watcher': true
+  '@scarf/scarf': false

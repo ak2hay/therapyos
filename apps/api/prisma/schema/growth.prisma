@@ -1,0 +1,145 @@
+enum NotificationChannel {
+  PUSH
+  SMS
+  EMAIL
+  WHATSAPP
+  IN_APP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  SKIPPED
+}
+
+model NotificationTemplate {
+  id                   String              @id @default(cuid())
+  tenantId             String?
+  event                String
+  channel              NotificationChannel
+  name                 String
+  subject              String?
+  body                 String
+  whatsappTemplateName String?
+  language             String              @default("en")
+  isActive             Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@unique([tenantId, event, channel, language])
+  @@map("notification_templates")
+}
+
+model NotificationPreference {
+  id       String              @id @default(cuid())
+  tenantId String
+  event    String
+  channel  NotificationChannel
+  enabled  Boolean             @default(true)
+
+  @@unique([tenantId, event, channel])
+  @@map("notification_preferences")
+}
+
+model NotificationLog {
+  id                String              @id @default(cuid())
+  tenantId          String?
+  customerId        String?
+  userId            String?
+  event             String
+  channel           NotificationChannel
+  recipient         String
+  subject           String?
+  body              String
+  status            NotificationStatus  @default(QUEUED)
+  provider          String?
+  providerMessageId String?
+  error             String?
+  refType           String?
+  refId             String?
+  campaignId        String?
+  dedupeKey         String?             @unique
+  attempts          Int                 @default(0)
+  createdAt         DateTime            @default(now())
+  sentAt            DateTime?
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, customerId])
+  @@index([providerMessageId])
+  @@map("notification_logs")
+}
+
+model InAppNotification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String?
+  branchId  String?
+  type      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId, userId, readAt])
+  @@map("in_app_notifications")
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+model Campaign {
+  id           String              @id @default(cuid())
+  tenantId     String
+  name         String
+  segment      CustomerSegment?
+  filters      Json                @default("{}")
+  channel      NotificationChannel
+  subject      String?
+  templateBody String
+  offerId      String?
+  couponId     String?
+  status       CampaignStatus      @default(DRAFT)
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdBy    String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  recipients   CampaignRecipient[]
+
+  @@index([tenantId, status])
+  @@map("campaigns")
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+  CONVERTED
+}
+
+model CampaignRecipient {
+  id                 String                  @id @default(cuid())
+  tenantId           String
+  campaignId         String
+  customerId         String
+  status             CampaignRecipientStatus @default(PENDING)
+  sentAt             DateTime?
+  convertedAt        DateTime?
+  convertedInvoiceId String?
+  revenue            Decimal                 @default(0) @db.Decimal(12, 2)
+  campaign           Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, customerId])
+  @@index([tenantId, customerId, sentAt])
+  @@map("campaign_recipients")
+}

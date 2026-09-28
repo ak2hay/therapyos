@@ -1,0 +1,26 @@
+{
+  "name": "therapyos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rkyves TherapyOS - multi-tenant business operating system for therapy and wellness businesses",
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "pnpm --filter @therapyos/web test:e2e",
+    "infra:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infrastructure/docker/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @therapyos/api prisma:migrate",
+    "db:deploy": "pnpm --filter @therapyos/api prisma:deploy",
+    "db:seed": "pnpm --filter @therapyos/api db:seed",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "turbo": "^2.5.8",
+    "typescript": "~5.9.2"
+  }
+}

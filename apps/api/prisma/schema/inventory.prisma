@@ -1,0 +1,182 @@
+model ProductCategory {
+  id        String    @id @default(cuid())
+  tenantId  String
+  name      String
+  createdAt DateTime  @default(now())
+  products  Product[]
+
+  @@unique([tenantId, name])
+  @@map("product_categories")
+}
+
+model Product {
+  id           String       @id @default(cuid())
+  tenantId     String
+  name         String
+  sku          String
+  categoryId   String?
+  category     ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  unit         String       @default("pcs")
+  costPrice    Decimal      @default(0) @db.Decimal(12, 2)
+  sellingPrice Decimal      @default(0) @db.Decimal(12, 2)
+  taxRate      Decimal      @default(0) @db.Decimal(5, 2)
+  isRetail     Boolean      @default(true)
+  isConsumable Boolean      @default(false)
+  barcode      String?
+  imageUrl     String?
+  status       RecordStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  stock        InventoryStock[]
+  transactions InventoryTransaction[]
+  consumables  ServiceConsumable[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, name])
+  @@map("products")
+}
+
+model InventoryStock {
+  id           String   @id @default(cuid())
+  tenantId     String
+  branchId     String
+  productId    String
+  quantity     Decimal  @default(0) @db.Decimal(12, 3)
+  reorderLevel Decimal  @default(0) @db.Decimal(12, 3)
+  lowStockAlertAt DateTime?
+  updatedAt    DateTime @updatedAt
+  branch       Branch   @relation(fields: [branchId], references: [id])
+  product      Product  @relation(fields: [productId], references: [id])
+
+  @@unique([branchId, productId])
+  @@index([tenantId, branchId, productId])
+  @@map("inventory_stock")
+}
+
+enum InventoryTxnType {
+  PURCHASE
+  SALE
+  CONSUMPTION
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+  RETURN
+  DAMAGE
+}
+
+model InventoryTransaction {
+  id            String           @id @default(cuid())
+  tenantId      String
+  branchId      String
+  productId     String
+  type          InventoryTxnType
+  quantity      Decimal          @db.Decimal(12, 3)
+  unitCost      Decimal?         @db.Decimal(12, 2)
+  referenceType String?
+  referenceId   String?
+  notes         String?
+  createdBy     String?
+  createdAt     DateTime         @default(now())
+  product       Product          @relation(fields: [productId], references: [id])
+
+  @@index([tenantId, branchId, productId])
+  @@index([tenantId, createdAt])
+  @@map("inventory_transactions")
+}
+
+enum TransferStatus {
+  REQUESTED
+  APPROVED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model InventoryTransfer {
+  id           String                  @id @default(cuid())
+  tenantId     String
+  fromBranchId String
+  toBranchId   String
+  status       TransferStatus          @default(REQUESTED)
+  notes        String?
+  requestedBy  String?
+  approvedBy   String?
+  createdAt    DateTime                @default(now())
+  approvedAt   DateTime?
+  completedAt  DateTime?
+  items        InventoryTransferItem[]
+
+  @@index([tenantId, status])
+  @@map("inventory_transfers")
+}
+
+model InventoryTransferItem {
+  id         String            @id @default(cuid())
+  transferId String
+  productId  String
+  quantity   Decimal           @db.Decimal(12, 3)
+  transfer   InventoryTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_transfer_items")
+}
+
+model Purchase {
+  id              String         @id @default(cuid())
+  tenantId        String
+  branchId        String
+  supplierName    String
+  referenceNumber String?
+  totalCost       Decimal        @db.Decimal(12, 2)
+  purchasedAt     DateTime       @default(now())
+  expenseId       String?
+  createdBy       String?
+  createdAt       DateTime       @default(now())
+  items           PurchaseItem[]
+
+  @@index([tenantId, branchId, purchasedAt])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  productId  String
+  quantity   Decimal  @db.Decimal(12, 3)
+  unitCost   Decimal  @db.Decimal(12, 2)
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_items")
+}
+
+enum ExpenseCategory {
+  RENT
+  SALARY
+  ELECTRICITY
+  INTERNET
+  MARKETING
+  SUPPLIES
+  MAINTENANCE
+  INVENTORY
+  OTHER
+}
+
+model Expense {
+  id            String          @id @default(cuid())
+  tenantId      String
+  branchId      String
+  category      ExpenseCategory
+  amount        Decimal         @db.Decimal(12, 2)
+  description   String?
+  expenseDate   DateTime        @db.Date
+  paymentMethod String          @default("CASH")
+  vendor        String?
+  receiptUrl    String?
+  createdBy     String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  branch        Branch          @relation(fields: [branchId], references: [id])
+
+  @@index([tenantId, branchId, expenseDate])
+  @@map("expenses")
+}

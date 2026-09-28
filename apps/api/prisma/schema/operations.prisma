@@ -1,0 +1,311 @@
+enum CustomerSource {
+  WALK_IN
+  WEBSITE
+  WHATSAPP
+  REFERRAL
+  INSTAGRAM
+  GOOGLE
+  CAMPAIGN
+  CUSTOMER_APP
+  OTHER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum CustomerSegment {
+  NEW
+  ACTIVE
+  LOYAL
+  AT_RISK
+  INACTIVE
+  CHURNED
+  VIP
+}
+
+model Customer {
+  id              String         @id @default(cuid())
+  tenantId        String
+  primaryBranchId String?
+  customerCode    String
+  name            String
+  phone           String
+  email           String?
+  dob             DateTime?      @db.Date
+  gender          Gender?
+  address         String?
+  city            String?
+  state           String?
+  pincode         String?
+  source          CustomerSource @default(WALK_IN)
+  status          CustomerStatus @default(ACTIVE)
+  notes           String?
+  tags            String[]       @default([])
+  marketingOptIn  Boolean        @default(false)
+  whatsappOptIn   Boolean        @default(true)
+  referredById    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  metrics      CustomerMetrics?
+  activities   CustomerActivity[]
+  appointments Appointment[]
+  queueEntries QueueEntry[]
+  sessions     TherapySession[]
+  invoices     Invoice[]
+  packages     CustomerPackage[]
+  memberships  CustomerMembership[]
+  refreshTokens RefreshToken[]
+
+  @@unique([tenantId, customerCode])
+  @@unique([tenantId, phone])
+  @@index([tenantId, name])
+  @@index([tenantId, createdAt])
+  @@map("customers")
+}
+
+model CustomerMetrics {
+  customerId           String          @id
+  tenantId             String
+  customer             Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  firstVisitAt         DateTime?
+  lastVisitAt          DateTime?
+  visitCount           Int             @default(0)
+  avgVisitIntervalDays Decimal?        @db.Decimal(8, 2)
+  totalSpend           Decimal         @default(0) @db.Decimal(12, 2)
+  avgSpend             Decimal         @default(0) @db.Decimal(12, 2)
+  lifetimeValue        Decimal         @default(0) @db.Decimal(12, 2)
+  expectedLtv          Decimal         @default(0) @db.Decimal(12, 2)
+  noShowCount          Int             @default(0)
+  hasActivePackage     Boolean         @default(false)
+  hasActiveMembership  Boolean         @default(false)
+  segment              CustomerSegment @default(NEW)
+  updatedAt            DateTime        @updatedAt
+
+  @@index([tenantId, segment])
+  @@index([tenantId, lastVisitAt])
+  @@map("customer_metrics")
+}
+
+model CustomerConsent {
+  id         String   @id @default(cuid())
+  tenantId   String
+  customerId String
+  channel    String
+  purpose    String
+  granted    Boolean
+  source     String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, customerId])
+  @@map("customer_consents")
+}
+
+model CustomerActivity {
+  id         String   @id @default(cuid())
+  tenantId   String
+  customerId String
+  branchId   String?
+  type       String
+  title      String
+  refType    String?
+  refId      String?
+  meta       Json?
+  occurredAt DateTime @default(now())
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerId, occurredAt])
+  @@map("customer_activities")
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentSource {
+  WALK_IN
+  RECEPTION
+  WEBSITE
+  CUSTOMER_APP
+  WHATSAPP
+  PHONE
+}
+
+model Appointment {
+  id              String            @id @default(cuid())
+  tenantId        String
+  branchId        String
+  customerId      String
+  serviceId       String
+  therapistId     String?
+  appointmentDate DateTime          @db.Date
+  startTime       DateTime
+  endTime         DateTime
+  status          AppointmentStatus @default(BOOKED)
+  source          AppointmentSource @default(RECEPTION)
+  notes           String?
+  cancelReason    String?
+  createdBy       String?
+  checkedInAt     DateTime?
+  cancelledAt     DateTime?
+  reminderSentAt  DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  branch     Branch           @relation(fields: [branchId], references: [id])
+  customer   Customer         @relation(fields: [customerId], references: [id])
+  service    Service          @relation(fields: [serviceId], references: [id])
+  therapist  Therapist?       @relation(fields: [therapistId], references: [id])
+  queueEntry QueueEntry?
+  sessions   TherapySession[]
+
+  @@index([tenantId, branchId, appointmentDate])
+  @@index([tenantId, therapistId, appointmentDate])
+  @@index([tenantId, customerId])
+  @@index([status, startTime])
+  @@map("appointments")
+}
+
+enum QueueStatus {
+  WAITING
+  CALLED
+  ASSIGNED
+  IN_SERVICE
+  COMPLETED
+  CANCELLED
+}
+
+model QueueEntry {
+  id            String      @id @default(cuid())
+  tenantId      String
+  branchId      String
+  customerId    String
+  appointmentId String?     @unique
+  serviceId     String?
+  therapistId   String?
+  queueNumber   Int
+  queueDate     DateTime    @db.Date
+  status        QueueStatus @default(WAITING)
+  priority      Int         @default(0)
+  notes         String?
+  checkedInAt   DateTime    @default(now())
+  calledAt      DateTime?
+  assignedAt    DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+
+  branch      Branch           @relation(fields: [branchId], references: [id])
+  customer    Customer         @relation(fields: [customerId], references: [id])
+  appointment Appointment?     @relation(fields: [appointmentId], references: [id])
+  service     Service?         @relation(fields: [serviceId], references: [id])
+  therapist   Therapist?       @relation(fields: [therapistId], references: [id])
+  sessions    TherapySession[]
+
+  @@unique([branchId, queueDate, queueNumber])
+  @@index([tenantId, branchId, queueDate, status])
+  @@map("queue_entries")
+}
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+model TherapySession {
+  id                   String        @id @default(cuid())
+  tenantId             String
+  branchId             String
+  appointmentId        String?
+  queueEntryId         String?
+  customerId           String
+  therapistId          String
+  serviceId            String
+  customerPackageId    String?
+  customerMembershipId String?
+  status               SessionStatus @default(SCHEDULED)
+  room                 String?
+  startedAt            DateTime?
+  pausedAt             DateTime?
+  totalPausedSeconds   Int           @default(0)
+  completedAt          DateTime?
+  notes                String?
+  rating               Int?
+  invoiceId            String?
+  createdBy            String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  branch      Branch       @relation(fields: [branchId], references: [id])
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+  queueEntry  QueueEntry?  @relation(fields: [queueEntryId], references: [id])
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  therapist   Therapist    @relation(fields: [therapistId], references: [id])
+  service     Service      @relation(fields: [serviceId], references: [id])
+  feedback    Feedback?
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, therapistId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, branchId, status])
+  @@map("therapy_sessions")
+}
+
+enum FeedbackSource {
+  IN_APP
+  QR
+  WHATSAPP
+  GOOGLE
+  MANUAL
+}
+
+model Feedback {
+  id          String          @id @default(cuid())
+  tenantId    String
+  branchId    String
+  customerId  String?
+  sessionId   String?         @unique
+  therapistId String?
+  rating      Int
+  comment     String?
+  source      FeedbackSource  @default(MANUAL)
+  createdAt   DateTime        @default(now())
+  session     TherapySession? @relation(fields: [sessionId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, branchId])
+  @@map("feedback")
+}
+
+model FeedbackRequest {
+  id         String    @id @default(cuid())
+  tenantId   String
+  branchId   String
+  sessionId  String?   @unique
+  customerId String?
+  token      String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@map("feedback_requests")
+}

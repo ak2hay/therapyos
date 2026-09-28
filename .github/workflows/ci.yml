@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: therapyos
+          POSTGRES_PASSWORD: therapyos
+          POSTGRES_DB: therapyos_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U therapyos" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://therapyos:therapyos@localhost:5432/therapyos_test?schema=public
+      TEST_DATABASE_URL: postgresql://therapyos:therapyos@localhost:5432/therapyos_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-access-secret-at-least-32-characters-long
+      STORAGE_DRIVER: local
+      RUN_WORKER_IN_API: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @therapyos/api exec prisma generate
+      - run: pnpm --filter @therapyos/api exec prisma migrate deploy
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+        continue-on-error: true
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: docker compose -f infrastructure/docker/docker-compose.yml up -d
+      - run: cp apps/api/.env.example apps/api/.env
+      - run: pnpm --filter @therapyos/api exec prisma migrate deploy
+      - run: pnpm build
+      - run: pnpm db:seed
+      - run: pnpm --filter @therapyos/web exec playwright install --with-deps chromium
+      - name: Start servers
+        run: |
+          (cd apps/api && node dist/main.js &) 
+          (cd apps/web && pnpm start &)
+          npx wait-on http://localhost:4000/health http://localhost:3000/login --timeout 120000
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images
+        run: |
+          docker build -f infrastructure/docker/api.Dockerfile -t therapyos-api:ci .
+          docker build -f infrastructure/docker/web.Dockerfile -t therapyos-web:ci .
+      - name: Trivy scan (API)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: therapyos-api:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+      - name: Trivy scan (Web)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: therapyos-web:ci
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true

@@ -1,0 +1,117 @@
+name: therapyos
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: therapyos
+      POSTGRES_PASSWORD: therapyos
+      POSTGRES_DB: therapyos
+    ports:
+      - '5434:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U therapyos']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6380:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  s3:
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    command: 'server -dir=/data -s3 -s3.port=8333'
+    ports:
+      - '8333:8333'
+    volumes:
+      - s3data:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
+  # --- Full containerised stack: `docker compose -f infrastructure/docker/docker-compose.yml --profile app up -d --build`
+  migrate:
+    profiles: [app]
+    build: { context: ../.., dockerfile: infrastructure/docker/api.Dockerfile, target: migrate }
+    environment: &api-env
+      NODE_ENV: production
+      DATABASE_URL: postgresql://therapyos:therapyos@postgres:5432/therapyos?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-compose-secret-change-me-0123456789}
+      APP_URL: http://localhost:3000
+      API_URL: http://localhost:4000
+      CORS_ORIGINS: http://localhost:3000
+      STORAGE_DRIVER: local
+      EMAIL_PROVIDER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: '1025'
+      BULL_BOARD_PASSWORD: ${BULL_BOARD_PASSWORD:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    profiles: [app]
+    build: { context: ../.., dockerfile: infrastructure/docker/api.Dockerfile, target: runtime }
+    image: therapyos-api:local
+    restart: unless-stopped
+    environment: *api-env
+    ports:
+      - '4000:4000'
+    volumes:
+      - uploads:/repo/apps/api/uploads
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    profiles: [app]
+    image: therapyos-api:local
+    restart: unless-stopped
+    command: ['node', 'dist/worker.js']
+    environment: *api-env
+    healthcheck: { disable: true }
+    volumes:
+      - uploads:/repo/apps/api/uploads
+    depends_on:
+      api: { condition: service_started }
+
+  web:
+    profiles: [app]
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args: { API_URL: 'http://api:4000' }
+    image: therapyos-web:local
+    restart: unless-stopped
+    environment:
+      APP_URL: http://localhost:3000
+    ports:
+      - '3000:3000'
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  pgdata:
+  redisdata:
+  s3data:
+  uploads:
