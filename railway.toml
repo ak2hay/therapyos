@@ -1,0 +1,10 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "infrastructure/docker/railway-api.Dockerfile"
+watchPatterns = ["apps/api/**", "packages/**", "infrastructure/docker/railway-api.Dockerfile", "pnpm-lock.yaml"]
+
+[deploy]
+healthcheckPath = "/health/live"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
