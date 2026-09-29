@@ -15,6 +15,7 @@ import {
   SmtpEmailProvider,
   WhatsAppProvider,
 } from './messaging.providers';
+import { Msg91OtpWidget, OtpWidgetPublicConfig } from './otp-widget';
 import { MockPaymentProvider, PaymentProvider, RazorpayPaymentProvider } from './payment.provider';
 
 const MAX_CACHED = 200;
@@ -52,6 +53,7 @@ export class ProviderFactory {
   build(provider: 'WHATSAPP_CLOUD', values: IntegrationValues): CloudWhatsAppProvider;
   build(provider: 'SMTP', values: IntegrationValues): SmtpEmailProvider;
   build(provider: 'OPENAI', values: IntegrationValues): OpenAiLlmProvider;
+  build(provider: 'MSG91_OTP_WIDGET', values: IntegrationValues): Msg91OtpWidget;
   build(provider: IntegrationProviderKey, values: IntegrationValues): unknown;
   build(provider: IntegrationProviderKey, v: IntegrationValues): unknown {
     return this.cached(provider, v, () => {
@@ -66,8 +68,20 @@ export class ProviderFactory {
           return new SmtpEmailProvider({ host: String(v.host), port: Number(v.port ?? 587), user: str(v.user), pass: str(v.pass), fromAddress: String(v.fromAddress), fromName: str(v.fromName) });
         case 'OPENAI':
           return new OpenAiLlmProvider({ apiKey: String(v.apiKey), model: str(v.model) ?? 'gpt-4o-mini' });
+        case 'MSG91_OTP_WIDGET':
+          return new Msg91OtpWidget({ widgetId: String(v.widgetId), tokenAuth: String(v.tokenAuth), authKey: String(v.authKey), smsEnabled: v.smsEnabled !== false, emailEnabled: v.emailEnabled === true });
       }
     });
+  }
+
+  /** MSG91 OTP Widget for a business (its own widget, else the platform one); null when not configured. */
+  async otpWidget(tenantId: string | null | undefined): Promise<Msg91OtpWidget | null> {
+    const r = await this.config.resolve('MSG91_OTP_WIDGET', tenantId);
+    return r ? this.build('MSG91_OTP_WIDGET', r.values) : null;
+  }
+
+  async otpWidgetPublicConfig(tenantId: string | null | undefined): Promise<OtpWidgetPublicConfig> {
+    return (await this.otpWidget(tenantId))?.publicConfig() ?? { enabled: false };
   }
 
   async sms(tenantId: string | null | undefined): Promise<SmsProvider> {
@@ -109,7 +123,7 @@ export class ProviderFactory {
   }
 
   async sources(tenantId: string | null): Promise<Record<string, IntegrationSource>> {
-    const keys: IntegrationProviderKey[] = ['RAZORPAY', 'MSG91', 'WHATSAPP_CLOUD', 'SMTP', 'OPENAI'];
+    const keys: IntegrationProviderKey[] = ['RAZORPAY', 'MSG91', 'MSG91_OTP_WIDGET', 'WHATSAPP_CLOUD', 'SMTP', 'OPENAI'];
     const entries = await Promise.all(keys.map(async (k) => [k, await this.config.source(k, tenantId)] as const));
     return Object.fromEntries(entries);
   }
@@ -153,6 +167,15 @@ export class ProviderFactory {
           if (!to) return { ok: true, message: `MSG91 is configured (${via}). Enter a phone number to send a test OTP.` };
           const res = await this.build('MSG91', r.values).send(to, '', { otp: '123456' });
           return res.status === 'SENT' ? { ok: true, message: `Sent a test OTP (123456) to ${to} (${via}).` } : { ok: false, message: res.error ?? 'Sending failed' };
+        }
+        case 'MSG91_OTP_WIDGET': {
+          const widget = this.build('MSG91_OTP_WIDGET', r.values);
+          const res = await widget.verifyAccessToken(to || 'therapyos-connection-check');
+          if (res.ok) return { ok: true, message: `Access token verified for ${res.identifier} (${via}).` };
+          if (res.authFailure) return { ok: false, message: `MSG91 rejected the auth key: ${res.error}. Check the key and whitelist this server's IP for it in MSG91.` };
+          return to
+            ? { ok: false, message: `The access token was not accepted: ${res.error}` }
+            : { ok: true, message: `Auth key accepted by MSG91 (${via}). Paste an access token from a real widget login to check the full flow.` };
         }
       }
     } catch (e) {

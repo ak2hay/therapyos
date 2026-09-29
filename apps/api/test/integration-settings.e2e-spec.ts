@@ -28,7 +28,7 @@ describe('integration settings, platform settings and manual onboarding', () => 
 
       const list = await api.get('/integrations', 'owner').expect(200);
       expect(JSON.stringify(list.body)).not.toContain('tenant-secret-value-1234');
-      expect(list.body.data.items.map((i: { provider: string }) => i.provider)).toEqual(['RAZORPAY', 'MSG91', 'WHATSAPP_CLOUD', 'SMTP']);
+      expect(list.body.data.items.map((i: { provider: string }) => i.provider)).toEqual(['RAZORPAY', 'MSG91', 'MSG91_OTP_WIDGET', 'WHATSAPP_CLOUD', 'SMTP']);
       expect(list.body.data.webhookUrls.payments).toMatch(/\/api\/v1\/webhooks\/razorpay$/);
     });
 
@@ -59,6 +59,20 @@ describe('integration settings, platform settings and manual onboarding', () => 
       await api.put('/integrations/RAZORPAY', { enabled: false }, 'reception').expect(403);
     });
 
+    it('publishes the OTP widget config without the auth key', async () => {
+      await api
+        .put('/integrations/MSG91_OTP_WIDGET', { enabled: true, config: { widgetId: 'widget123', tokenAuth: 'token456', smsEnabled: true, emailEnabled: true }, secrets: { authKey: 'widget-auth-key-secret' } }, 'owner')
+        .expect(200);
+      const detail = await api.get('/integrations', 'owner').expect(200);
+      const slug = (await api.get('/tenant', 'owner')).body.data?.slug ?? 'serenity-wellness';
+      const pub = await api.get(`/public/otp-widget?tenant=${slug}`).expect(200);
+      expect(pub.body.data).toEqual({ enabled: true, widgetId: 'widget123', tokenAuth: 'token456', channels: { sms: true, email: true } });
+      expect(JSON.stringify(pub.body)).not.toContain('widget-auth-key-secret');
+      expect(JSON.stringify(detail.body)).not.toContain('widget-auth-key-secret');
+      expect((await api.get('/public/otp-widget').expect(200)).body.data).toEqual({ enabled: false });
+      await api.put('/integrations/MSG91_OTP_WIDGET', { enabled: false }, 'owner').expect(200);
+    });
+
     it('audits changes without secret values', async () => {
       const res = await api.get('/audit-logs?entityType=IntegrationConfig&pageSize=5', 'owner').expect(200);
       expect(res.body.data.length).toBeGreaterThan(0);
@@ -76,7 +90,7 @@ describe('integration settings, platform settings and manual onboarding', () => 
     it('lists every provider and masks secrets', async () => {
       await api.put('/admin/integrations/SMTP', { enabled: true, config: { host: 'smtp.example.com', port: 587, fromAddress: 'no-reply@example.com' }, secrets: { pass: 'platform-smtp-pass' } }, 'admin').expect(200);
       const res = await api.get('/admin/integrations', 'admin').expect(200);
-      expect(res.body.data.items.map((i: { provider: string }) => i.provider)).toEqual(['RAZORPAY', 'MSG91', 'WHATSAPP_CLOUD', 'SMTP', 'OPENAI']);
+      expect(res.body.data.items.map((i: { provider: string }) => i.provider)).toEqual(['RAZORPAY', 'MSG91', 'MSG91_OTP_WIDGET', 'WHATSAPP_CLOUD', 'SMTP', 'OPENAI']);
       expect(JSON.stringify(res.body)).not.toContain('platform-smtp-pass');
       expect(res.body.data.items.find((i: { provider: string }) => i.provider === 'SMTP').effectiveSource).toBe('platform');
       await api.put('/admin/integrations/SMTP', { enabled: false }, 'admin').expect(200);

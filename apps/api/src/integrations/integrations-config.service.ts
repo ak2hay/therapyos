@@ -49,6 +49,8 @@ export function envIntegration(provider: IntegrationProviderKey): IntegrationVal
         : null;
     case 'MSG91':
       return e.SMS_PROVIDER === 'msg91' && e.SMS_API_KEY ? clean({ authKey: e.SMS_API_KEY, senderId: e.SMS_SENDER_ID }) : null;
+    case 'MSG91_OTP_WIDGET':
+      return null;
     case 'WHATSAPP_CLOUD':
       return e.WHATSAPP_PROVIDER === 'cloud' && e.WHATSAPP_PHONE_NUMBER_ID && e.WHATSAPP_ACCESS_TOKEN
         ? clean({ phoneNumberId: e.WHATSAPP_PHONE_NUMBER_ID, accessToken: e.WHATSAPP_ACCESS_TOKEN })

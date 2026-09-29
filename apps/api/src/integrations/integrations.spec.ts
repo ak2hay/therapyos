@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { open, openJson, seal, sealJson, secretHint } from '../common/utils/secret-box';
 import { IntegrationsConfigService } from './integrations-config.service';
 import { Msg91SmsProvider } from './messaging.providers';
+import { Msg91OtpWidget } from './otp-widget';
 import { RazorpayPaymentProvider } from './payment.provider';
 
 process.env.DATABASE_URL ??= 'postgresql://unit:unit@localhost:5432/unit';
@@ -56,6 +57,29 @@ describe('MSG91 flow payload', () => {
   it('falls back to the default template and refuses free text without one', () => {
     expect(Msg91SmsProvider.payload(creds, '9845010036', {})?.template_id).toBe('default_tpl');
     expect(Msg91SmsProvider.payload({ authKey: 'k' }, '9845010036', {})).toBeNull();
+  });
+});
+
+describe('MSG91 OTP widget', () => {
+  const widget = new Msg91OtpWidget({ widgetId: 'w1', tokenAuth: 't1', authKey: 'server-key', smsEnabled: true, emailEnabled: false });
+  const reply = (status: number, body: object) => jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status }));
+  afterEach(() => jest.restoreAllMocks());
+
+  it('exposes only what the browser needs', () => {
+    expect(widget.publicConfig()).toEqual({ enabled: true, widgetId: 'w1', tokenAuth: 't1', channels: { sms: true, email: false } });
+  });
+
+  it('accepts a verified token and returns the identifier', async () => {
+    const spy = reply(200, { type: 'success', message: '919845010036' });
+    await expect(widget.verifyAccessToken('jwt-token')).resolves.toEqual({ ok: true, identifier: '919845010036' });
+    expect(JSON.parse(spy.mock.calls[0][1]!.body as string)).toEqual({ authkey: 'server-key', 'access-token': 'jwt-token' });
+  });
+
+  it('treats an HTTP 200 error body as a failure', async () => {
+    reply(200, { type: 'error', message: 'AuthenticationFailure', code: '201' });
+    await expect(widget.verifyAccessToken('jwt-token')).resolves.toEqual({ ok: false, error: 'AuthenticationFailure', authFailure: true });
+    reply(200, { type: 'error', message: 'Invalid token' });
+    await expect(widget.verifyAccessToken('jwt-token')).resolves.toMatchObject({ ok: false, authFailure: false });
   });
 });
 

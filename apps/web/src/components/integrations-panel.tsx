@@ -16,6 +16,7 @@ interface ListResponse {
 
 const TEST_TARGET: Partial<Record<IntegrationProviderKey, { label: string; placeholder: string }>> = {
   MSG91: { label: 'Send a test OTP to', placeholder: '+9198xxxxxxxx' },
+  MSG91_OTP_WIDGET: { label: 'Access token from a widget login (optional)', placeholder: 'Access token (optional)' },
   WHATSAPP_CLOUD: { label: 'Send hello_world to', placeholder: '+9198xxxxxxxx' },
   SMTP: { label: 'Send a test email to', placeholder: 'you@example.com' },
 };
@@ -55,7 +56,11 @@ function IntegrationCard({ view, scope, basePath, webhookUrls }: { view: Integra
   const def = INTEGRATIONS[view.provider];
   const [enabled, setEnabled] = useState(view.enabled);
   const [config, setConfig] = useState<Record<string, string>>(() =>
-    Object.fromEntries(def.fields.filter((f) => !f.secret).map((f) => [f.key, view.config[f.key] == null ? '' : String(view.config[f.key])])),
+    Object.fromEntries(
+      def.fields
+        .filter((f) => !f.secret)
+        .map((f) => [f.key, view.config[f.key] != null ? String(view.config[f.key]) : f.type === 'boolean' ? String(f.defaultValue ?? false) : '']),
+    ),
   );
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [clear, setClear] = useState<string[]>([]);
@@ -71,7 +76,11 @@ function IntegrationCard({ view, scope, basePath, webhookUrls }: { view: Integra
     try {
       const body = {
         enabled,
-        config: Object.fromEntries(def.fields.filter((f) => !f.secret).map((f) => [f.key, f.type === 'number' ? (config[f.key] ? Number(config[f.key]) : null) : config[f.key]?.trim() || null])),
+        config: Object.fromEntries(
+          def.fields
+            .filter((f) => !f.secret)
+            .map((f) => [f.key, f.type === 'boolean' ? config[f.key] === 'true' : f.type === 'number' ? (config[f.key] ? Number(config[f.key]) : null) : config[f.key]?.trim() || null]),
+        ),
         secrets: Object.fromEntries(Object.entries(secrets).filter(([, v]) => v.trim())),
         clear,
       };
@@ -132,6 +141,10 @@ function IntegrationCard({ view, scope, basePath, webhookUrls }: { view: Integra
                     )}
                   </div>
                 </Field>
+              ) : f.type === 'boolean' ? (
+                <div key={f.key} className="flex items-center">
+                  <Checkbox label={f.label} checked={config[f.key] === 'true'} onChange={(e) => setConfig((c) => ({ ...c, [f.key]: String(e.target.checked) }))} />
+                </div>
               ) : (
                 <Field key={f.key} label={`${f.label}${f.required ? ' *' : ''}`} hint={f.help}>
                   <Input

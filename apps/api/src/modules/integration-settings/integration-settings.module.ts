@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Module, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Module, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@therapyos/types';
 import { integrationProviderSchema, integrationTestSchema } from '@therapyos/validation';
@@ -6,7 +6,9 @@ import { z } from 'zod';
 import { Public, RequirePermissions } from '../../common/decorators';
 import { RequestContext } from '../../common/context/request-context';
 import { Zod } from '../../common/pipes/zod.pipe';
+import { Db, InjectDb } from '../../common/prisma/prisma.service';
 import { PlatformSettingsService } from '../../integrations/platform-settings.service';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { IntegrationSettingsService } from './integration-settings.service';
 
 type Provider = z.infer<typeof integrationProviderSchema>;
@@ -50,8 +52,27 @@ export class PublicPlatformController {
   }
 }
 
+const otpWidgetQuery = z.object({ tenant: z.string().trim().max(80).optional() });
+
+/** Widget ID, token and channels for starting the MSG91 OTP Widget on a login screen. */
+@ApiTags('Platform')
+@Controller('public/otp-widget')
+export class PublicOtpWidgetController {
+  constructor(
+    @InjectDb() private readonly db: Db,
+    private readonly providers: ProviderFactory,
+  ) {}
+
+  @Public()
+  @Get()
+  async get(@Query(Zod(otpWidgetQuery)) q: z.infer<typeof otpWidgetQuery>) {
+    const tenant = q.tenant ? await this.db.tenant.findUnique({ where: { slug: q.tenant }, select: { id: true } }) : null;
+    return this.providers.otpWidgetPublicConfig(tenant?.id ?? null);
+  }
+}
+
 @Module({
-  controllers: [IntegrationsController, PublicPlatformController],
+  controllers: [IntegrationsController, PublicPlatformController, PublicOtpWidgetController],
   providers: [IntegrationSettingsService],
   exports: [IntegrationSettingsService],
 })

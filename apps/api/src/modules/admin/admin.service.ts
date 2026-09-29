@@ -335,6 +335,7 @@ export class AdminService {
       providers: {
         payment: label('razorpay', sources.RAZORPAY),
         sms: label('msg91', sources.MSG91),
+        otpWidget: label('msg91 widget', sources.MSG91_OTP_WIDGET),
         email: label('smtp', sources.SMTP),
         whatsapp: label('cloud', sources.WHATSAPP_CLOUD),
         llm: label('openai', sources.OPENAI),

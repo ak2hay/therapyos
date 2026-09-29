@@ -28,8 +28,8 @@ export function integrationUpdateSchema(provider: IntegrationProviderKey) {
 export type IntegrationUpdateInput = z.infer<ReturnType<typeof integrationUpdateSchema>>;
 
 export const integrationTestSchema = z.object({
-  /** Phone number or email to send a test message to (optional for credential-only checks). */
-  to: z.string().trim().max(200).optional(),
+  /** Phone number or email to send a test message to, or a widget access token (optional for credential-only checks). */
+  to: z.string().trim().max(4000).optional(),
 });
 
 export const platformSettingsSchema = z

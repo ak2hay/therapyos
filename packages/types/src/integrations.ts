@@ -1,8 +1,8 @@
-export const INTEGRATION_PROVIDERS = ['RAZORPAY', 'MSG91', 'WHATSAPP_CLOUD', 'SMTP', 'OPENAI'] as const;
+export const INTEGRATION_PROVIDERS = ['RAZORPAY', 'MSG91', 'MSG91_OTP_WIDGET', 'WHATSAPP_CLOUD', 'SMTP', 'OPENAI'] as const;
 export type IntegrationProviderKey = (typeof INTEGRATION_PROVIDERS)[number];
 
 /** Providers a business may override with its own account; the rest are platform-only. */
-export const TENANT_INTEGRATIONS: IntegrationProviderKey[] = ['RAZORPAY', 'MSG91', 'WHATSAPP_CLOUD', 'SMTP'];
+export const TENANT_INTEGRATIONS: IntegrationProviderKey[] = ['RAZORPAY', 'MSG91', 'MSG91_OTP_WIDGET', 'WHATSAPP_CLOUD', 'SMTP'];
 
 export type IntegrationSource = 'tenant' | 'platform' | 'env' | 'mock';
 
@@ -48,6 +48,19 @@ export const INTEGRATIONS: Record<IntegrationProviderKey, IntegrationDefinition>
       { key: 'senderId', label: 'Sender ID', required: true, placeholder: 'RKYVES', help: '6-letter DLT header approved for your templates.' },
       { key: 'otpTemplateId', label: 'OTP flow template ID', help: 'Flow for login codes. The code is sent as ##otp## and ##var1##.' },
       { key: 'defaultTemplateId', label: 'Fallback flow template ID', help: 'Used when a notification template has no MSG91 template ID. Variables are sent as ##var1##, ##var2##... in placeholder order.' },
+    ],
+  },
+  MSG91_OTP_WIDGET: {
+    provider: 'MSG91_OTP_WIDGET',
+    name: 'MSG91 OTP Widget',
+    description: 'Login OTPs by SMS and email through the MSG91 OTP Widget (MSG91 > OTP > Widget). The server confirms every verified login with MSG91.',
+    docsUrl: 'https://control.msg91.com/app/m/l/otp/widget',
+    fields: [
+      { key: 'widgetId', label: 'Widget ID', required: true, placeholder: '3568656c6d31353031373135' },
+      { key: 'tokenAuth', label: 'Widget token (tokenAuth)', required: true, help: 'The token created for the OTP Widget (MSG91 > OTP > Tokens). It is used in the browser and app, so it is not treated as a secret.' },
+      { key: 'authKey', label: 'Auth key (server-side)', secret: true, required: true, help: 'Used to verify the access token returned by the widget. Whitelist the API server IP for this auth key in MSG91.' },
+      { key: 'smsEnabled', label: 'Send OTP by SMS', type: 'boolean', defaultValue: true },
+      { key: 'emailEnabled', label: 'Send OTP by email', type: 'boolean', defaultValue: false },
     ],
   },
   WHATSAPP_CLOUD: {

@@ -237,6 +237,7 @@ model FeatureFlag {
 enum IntegrationProvider {
   RAZORPAY
   MSG91
+  MSG91_OTP_WIDGET
   WHATSAPP_CLOUD
   SMTP
   OPENAI
