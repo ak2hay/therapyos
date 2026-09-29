@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { env } from '../config/env';
 
 export interface LlmRequest {
   system: string;
@@ -26,16 +25,31 @@ export class MockLlmProvider extends LlmProvider {
   }
 }
 
-@Injectable()
+export interface OpenAiCredentials {
+  apiKey: string;
+  model: string;
+}
+
 export class OpenAiLlmProvider extends LlmProvider {
   readonly name = 'openai';
+  constructor(private readonly creds: OpenAiCredentials) {
+    super();
+  }
+
+  async ping() {
+    const res = await fetch('https://api.openai.com/v1/models', { headers: { authorization: `Bearer ${this.creds.apiKey}` } });
+    if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as { error?: { message: string } };
+      throw new Error(json.error?.message ?? `OpenAI HTTP ${res.status}`);
+    }
+  }
+
   async answer(req: LlmRequest): Promise<string> {
-    const e = env();
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { authorization: `Bearer ${e.OPENAI_API_KEY}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${this.creds.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: e.OPENAI_MODEL,
+        model: this.creds.model,
         temperature: 0.2,
         messages: [
           { role: 'system', content: req.system },

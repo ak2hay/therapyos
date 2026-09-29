@@ -10,6 +10,7 @@ import {
   FileText,
   Gift,
   HeartHandshake,
+  KeyRound,
   LayoutDashboard,
   LifeBuoy,
   ListOrdered,
@@ -112,6 +113,8 @@ export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/tenants', label: 'Tenants', icon: Building2 },
   { href: '/admin/plans', label: 'Plans', icon: Crown },
   { href: '/admin/flags', label: 'Feature Flags', icon: HeartHandshake },
+  { href: '/admin/integrations', label: 'Integrations', icon: KeyRound },
+  { href: '/admin/settings', label: 'Platform Settings', icon: Settings },
   { href: '/admin/support', label: 'Support', icon: LifeBuoy },
   { href: '/admin/system', label: 'System Health', icon: BarChart3 },
 ];

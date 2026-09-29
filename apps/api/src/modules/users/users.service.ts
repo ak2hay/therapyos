@@ -9,7 +9,7 @@ import { pageArgs, paged } from '../../common/utils/pagination';
 import { AuditService } from '../../core/audit.service';
 import { AuthzService } from '../../core/authz.service';
 import { FeaturesService } from '../../core/features.service';
-import { EmailProvider } from '../../integrations/messaging.providers';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { hashPassword } from '../tenants/provisioning.service';
 import { sha256, TokenService } from '../auth/token.service';
 
@@ -22,7 +22,7 @@ export class UsersService {
     private readonly audit: AuditService,
     private readonly authz: AuthzService,
     private readonly features: FeaturesService,
-    private readonly email: EmailProvider,
+    private readonly providers: ProviderFactory,
     private readonly tokens: TokenService,
   ) {}
 
@@ -125,8 +125,10 @@ export class UsersService {
   }
 
   private async sendInvite(email: string, name: string, token: string) {
-    const tenantName = (await this.db.tenant.findUnique({ where: { id: RequestContext.requireTenantId() } }))?.name ?? 'TherapyOS';
-    await this.email.send(
+    const tenantId = RequestContext.requireTenantId();
+    const tenantName = (await this.db.tenant.findUnique({ where: { id: tenantId } }))?.name ?? 'TherapyOS';
+    const mailer = await this.providers.email(tenantId);
+    await mailer.send(
       email,
       `You're invited to ${tenantName} on TherapyOS`,
       `<p>Hi ${name},</p><p>You have been invited to join <b>${tenantName}</b> on TherapyOS.</p>

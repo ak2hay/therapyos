@@ -4,7 +4,7 @@ import { randomInt } from 'crypto';
 import { InjectRedis } from '../../common/redis/redis.module';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCode } from '../../common/errors/error-codes';
-import { SmsProvider } from '../../integrations/messaging.providers';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { isProd } from '../../config/env';
 import { sha256 } from './token.service';
 
@@ -17,7 +17,7 @@ const RESEND_COOLDOWN = 30;
 export class OtpService {
   constructor(
     @InjectRedis() private readonly redis: Redis,
-    private readonly sms: SmsProvider,
+    private readonly providers: ProviderFactory,
   ) {}
 
   private key(phone: string, scope?: string) {
@@ -25,7 +25,8 @@ export class OtpService {
   }
 
   /** `scope` keeps separate codes per purpose, e.g. customer sign-in for one business vs. staff sign-in. */
-  async send(phone: string, scope?: string): Promise<{ sent: true; devCode?: string }> {
+  /** `tenantId` selects the business's own SMS account when it has one. */
+  async send(phone: string, scope?: string, tenantId?: string | null): Promise<{ sent: true; devCode?: string }> {
     const key = this.key(phone, scope);
     const cooldownKey = `${key}:cooldown`;
     if (await this.redis.exists(cooldownKey)) {
@@ -38,7 +39,12 @@ export class OtpService {
       .expire(key, OTP_TTL)
       .set(cooldownKey, '1', 'EX', RESEND_COOLDOWN)
       .exec();
-    await this.sms.send(phone, `${code} is your TherapyOS verification code. It expires in 5 minutes.`);
+    const sms = await this.providers.sms(tenantId);
+    const result = await sms.send(phone, `${code} is your TherapyOS verification code. It expires in 5 minutes.`, { otp: code });
+    if (result.status === 'FAILED') {
+      await this.redis.del(key, cooldownKey);
+      throw AppError.badRequest(ErrorCode.PROVIDER_ERROR, 'We could not send the code by SMS. Please try again shortly.');
+    }
     return isProd() ? { sent: true } : { sent: true, devCode: code };
   }
 

@@ -45,6 +45,7 @@ export function client(app: INestApplication) {
     get: (path: string, as?: Role | string) => auth(http().get(`/api/v1${path}`), as),
     post: (path: string, body: object = {}, as?: Role | string) => auth(http().post(`/api/v1${path}`).send(body), as),
     patch: (path: string, body: object = {}, as?: Role | string) => auth(http().patch(`/api/v1${path}`).send(body), as),
+    put: (path: string, body: object = {}, as?: Role | string) => auth(http().put(`/api/v1${path}`).send(body), as),
     delete: (path: string, as?: Role | string) => auth(http().delete(`/api/v1${path}`), as),
     raw: http,
   };

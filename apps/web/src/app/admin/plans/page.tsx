@@ -21,16 +21,17 @@ interface Plan {
   features: string[];
   status: 'ACTIVE' | 'INACTIVE';
   sortOrder: number;
+  providerPlanIds: { MONTHLY?: string; ANNUAL?: string } | null;
   subscribers: number;
   paying: number;
 }
-const EMPTY = { code: '', name: '', description: '', monthlyPrice: '', annualPrice: '', maxBranches: '1', maxUsers: '5', maxCustomers: '1000', features: [] as string[], status: 'ACTIVE', sortOrder: '0' };
+const EMPTY = { code: '', name: '', description: '', monthlyPrice: '', annualPrice: '', maxBranches: '1', maxUsers: '5', maxCustomers: '1000', features: [] as string[], status: 'ACTIVE', sortOrder: '0', rzpMonthly: '', rzpAnnual: '' };
 
 function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState(
     plan
-      ? { code: plan.code, name: plan.name, description: plan.description ?? '', monthlyPrice: String(plan.monthlyPrice), annualPrice: String(plan.annualPrice), maxBranches: String(plan.maxBranches), maxUsers: String(plan.maxUsers), maxCustomers: String(plan.maxCustomers), features: plan.features, status: plan.status, sortOrder: String(plan.sortOrder) }
+      ? { code: plan.code, name: plan.name, description: plan.description ?? '', monthlyPrice: String(plan.monthlyPrice), annualPrice: String(plan.annualPrice), maxBranches: String(plan.maxBranches), maxUsers: String(plan.maxUsers), maxCustomers: String(plan.maxCustomers), features: plan.features, status: plan.status, sortOrder: String(plan.sortOrder), rzpMonthly: plan.providerPlanIds?.MONTHLY ?? '', rzpAnnual: plan.providerPlanIds?.ANNUAL ?? '' }
       : EMPTY,
   );
   const [busy, setBusy] = useState(false);
@@ -38,8 +39,10 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
   const submit = async () => {
     setBusy(true);
     try {
-      if (plan) await api.patch(`/admin/plans/${plan.id}`, form);
-      else await api.post('/admin/plans', form);
+      const { rzpMonthly, rzpAnnual, ...rest } = form;
+      const body = { ...rest, providerPlanIds: { MONTHLY: rzpMonthly.trim(), ANNUAL: rzpAnnual.trim() } };
+      if (plan) await api.patch(`/admin/plans/${plan.id}`, body);
+      else await api.post('/admin/plans', body);
       toast.success(plan ? 'Plan updated' : 'Plan created');
       await qc.invalidateQueries({ queryKey: ['admin'] });
       onClose();
@@ -69,6 +72,9 @@ function PlanModal({ plan, onClose }: { plan: Plan | null; onClose: () => void }
         <Field label="Max branches"><Input type="number" min={1} value={form.maxBranches} onChange={(e) => set('maxBranches', e.target.value)} /></Field>
         <Field label="Max staff"><Input type="number" min={1} value={form.maxUsers} onChange={(e) => set('maxUsers', e.target.value)} /></Field>
         <Field label="Max customers"><Input type="number" min={1} value={form.maxCustomers} onChange={(e) => set('maxCustomers', e.target.value)} /></Field>
+        <Field label="Razorpay plan id (monthly)" hint="From Razorpay → Subscriptions → Plans, e.g. plan_Nx…"><Input value={form.rzpMonthly} onChange={(e) => set('rzpMonthly', e.target.value)} placeholder="plan_…" /></Field>
+        <Field label="Razorpay plan id (yearly)" hint="Leave blank if yearly billing is not offered online."><Input value={form.rzpAnnual} onChange={(e) => set('rzpAnnual', e.target.value)} placeholder="plan_…" /></Field>
+        <div className="hidden sm:block" />
         <Field label="Included features" className="sm:col-span-3">
           <div className="grid gap-1.5 sm:grid-cols-3">
             {FEATURE_FLAG_KEYS.map((k) => (

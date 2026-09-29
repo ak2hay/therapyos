@@ -31,6 +31,8 @@ Keep `RUN_WORKER_IN_API` unset (false) in production so that request latency is 
 - Store secrets in the platform's secret manager and inject them as environment variables. These include `DATABASE_URL`, `JWT_ACCESS_SECRET`, provider keys, `RAZORPAY_WEBHOOK_SECRET`, `METRICS_TOKEN` and `BULL_BOARD_PASSWORD`.
 - Required in production: `NODE_ENV=production`, a JWT secret of 32+ random characters, `APP_URL`, `API_URL`, `CORS_ORIGINS` and real provider settings for every channel you use. Mock providers are for development only.
 - Rotating `JWT_ACCESS_SECRET` signs everyone out within 15 minutes, once current access tokens expire. Refresh tokens are unaffected, so clients silently re-authenticate.
+- Provider keys (Razorpay, MSG91, WhatsApp, SMTP, OpenAI) are usually entered in **Super admin → Integrations**, and businesses may add their own in **Settings → Integrations**. They are stored in `integration_configs`, encrypted with `SETTINGS_ENCRYPTION_KEY` (AES-256-GCM). Environment variables remain a fallback when nothing is saved.
+- `SETTINGS_ENCRYPTION_KEY` is required in production. Keep a copy outside the server (the VM deploy script writes one to `/root/.therapyos-settings-encryption-key`). If the key is lost or changed, saved secrets cannot be decrypted: the API logs `Cannot decrypt ... secrets`, falls back to the next credential source, and every key has to be re-entered. Database dumps alone are not enough to restore integrations without this key.
 
 ## Releases
 
@@ -117,7 +119,11 @@ Uploaded files live in object storage. Enable bucket versioning and cross-region
 
 **Notifications are not being delivered.** Check `/admin/queues` for the `notifications` queue. If jobs are failing, open one to see the provider error (expired WhatsApp token, SMS DLT template mismatch, SMTP authentication). Fix the credentials; failed jobs retry with backoff, and you can retry them from Bull Board. Owners can also see per-message delivery status in the notification log under **Settings → Notifications**.
 
-**A payment was taken but the invoice still shows due.** Check the Razorpay dashboard's webhook deliveries for `/api/v1/webhooks/razorpay`. A 400 response means the webhook secret does not match `RAZORPAY_WEBHOOK_SECRET`. After fixing it, redeliver the event from Razorpay. Capture is idempotent, so redelivery is safe.
+**A payment was taken but the invoice still shows due.** Check the Razorpay dashboard's webhook deliveries for `/api/v1/webhooks/razorpay`. A 400 response means the webhook secret does not match the one saved for the account that created the order: the business's own Razorpay card if it uses its own keys, otherwise the platform card (or `RAZORPAY_WEBHOOK_SECRET`). Each payment remembers which key created it, so switching accounts does not break older orders. After fixing it, redeliver the event from Razorpay. Capture is idempotent, so redelivery is safe.
+
+**An integration stopped working after a key change.** Use *Test connection* on the card (platform or business). The **System Health** page shows which source each provider currently uses (platform, server env or mock). A business card marked "Using your own" with wrong keys affects only that business; untick "Use my own account" to fall back to the platform keys.
+
+**Onboarding a client manually.** Super admin → Tenants → **New business**. Choose an email invitation (the owner sets a password; the link is also shown so you can share it on WhatsApp) or a temporary password, which is shown only once. If the owner loses it, use **Reset password** on the tenant page, which also signs them out everywhere. To stop self sign-up, untick it in **Platform settings**; the sign-up page then shows the support contacts instead.
 
 **A tenant reports they cannot sign in.** In the admin console, check the tenant's status and subscription; suspended tenants are blocked. Then check the user's status on the tenant's **Staff** page. Login is rate-limited to 10 attempts per minute per client, so a shared office IP can hit the limit during onboarding.
 

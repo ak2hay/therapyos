@@ -88,7 +88,7 @@ export class PortalAuthService {
 
   async sendOtp(input: Input<typeof portalSendOtpSchema>) {
     const t = await this.tenant(input.tenantSlug);
-    return this.otp.send(phoneVariants(input.phone).e164, this.scope(t.id));
+    return this.otp.send(phoneVariants(input.phone).e164, this.scope(t.id), t.id);
   }
 
   async verifyOtp(input: Input<typeof portalVerifyOtpSchema>) {

@@ -440,6 +440,7 @@ model Payment {
   provider              String?
   providerOrderId       String?
   providerTransactionId String?
+  gatewayKeyId          String?
   status                PaymentStatus @default(PENDING)
   reference             String?
   notes                 String?

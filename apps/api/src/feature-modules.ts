@@ -34,6 +34,7 @@ import { PackagesModule } from './modules/packages/packages.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { SessionsModule } from './modules/sessions/sessions.module';
+import { IntegrationSettingsModule } from './modules/integration-settings/integration-settings.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { UsersModule } from './modules/users/users.module';
@@ -47,6 +48,7 @@ export const FEATURE_MODULES = [
   BranchesModule,
   UsersModule,
   SettingsModule,
+  IntegrationSettingsModule,
   FilesModule,
   CatalogModule,
   OnboardingModule,

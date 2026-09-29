@@ -41,6 +41,7 @@ interface TemplateRow {
   subject: string | null;
   body: string;
   whatsappTemplateName: string | null;
+  smsTemplateId?: string | null;
   isActive: boolean;
 }
 interface TemplateEvent {
@@ -72,7 +73,7 @@ const EVENT_HELP: Record<string, string> = {
 
 function TemplateEditor({ event, channel, row, variables, onClose }: { event: string; channel: Channel; row: TemplateRow | null; variables: string[]; onClose: () => void }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: row?.name ?? titleCase(event), subject: row?.subject ?? '', body: row?.body ?? '', whatsappTemplateName: row?.whatsappTemplateName ?? '', isActive: row?.isActive ?? true });
+  const [form, setForm] = useState({ name: row?.name ?? titleCase(event), subject: row?.subject ?? '', body: row?.body ?? '', whatsappTemplateName: row?.whatsappTemplateName ?? '', smsTemplateId: row?.smsTemplateId ?? '', isActive: row?.isActive ?? true });
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -125,6 +126,11 @@ function TemplateEditor({ event, channel, row, variables, onClose }: { event: st
           {channel === 'WHATSAPP' && (
             <Field label="Approved WhatsApp template name" hint="Optional. With the WhatsApp Cloud API, business-initiated messages must use a Meta-approved template.">
               <Input value={form.whatsappTemplateName} onChange={(e) => setForm({ ...form, whatsappTemplateName: e.target.value })} placeholder="appointment_confirmation" />
+            </Field>
+          )}
+          {channel === 'SMS' && (
+            <Field label="MSG91 flow template ID (DLT)" hint="Required for Indian SMS through MSG91. Register this exact text on DLT; the {{variables}} are sent as ##var1##, ##var2##... in the order they first appear.">
+              <Input value={form.smsTemplateId} onChange={(e) => setForm({ ...form, smsTemplateId: e.target.value })} placeholder="64f0c1d2e3a4b5c6d7e8f901" />
             </Field>
           )}
           <Checkbox label="Active (untick to stop sending on this channel)" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />

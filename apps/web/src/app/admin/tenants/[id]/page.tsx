@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { FEATURE_FLAG_KEYS } from '@therapyos/types';
 import { Badge, Button, Card, CardContent, CardHeader, Field, Input, LoadingBlock, Modal, PageHeader, Select, StatCard, Table, TBody, TD, Textarea, TH, THead, TR } from '@therapyos/ui';
+import { CredentialsDialog, type OwnerCredentials } from '@/components/admin-onboarding';
 import { api, errorMessage } from '@/lib/api';
 import { ago, fmtDate, fmtDateTime, money, titleCase } from '@/lib/format';
 
@@ -28,7 +29,7 @@ interface TenantDetail {
   features: string[];
   overrides: { key: string; enabled: boolean }[];
   branches: { id: string; name: string; code: string; city: string | null; status: string }[];
-  owners: { id: string; name: string; email: string | null; phone: string | null; lastLoginAt: string | null }[];
+  owners: Owner[];
   audit: { id: string; action: string; entityType: string; actorType: string; createdAt: string }[];
   tickets: { id: string; subject: string; status: string; priority: string; updatedAt: string }[];
   activity: { gmvLast30Days: number; sessionsLast30Days: number };
@@ -164,6 +165,62 @@ function FlagOverrides({ tenant }: { tenant: TenantDetail }) {
   );
 }
 
+interface Owner {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  status: string;
+  lastLoginAt: string | null;
+}
+
+function OwnerAccess({ tenantId, owners }: { tenantId: string; owners: Owner[] }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<'invite' | 'reset' | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [creds, setCreds] = useState<OwnerCredentials | null>(null);
+  const invited = owners[0]?.status === 'INVITED';
+  const run = async (kind: 'invite' | 'reset') => {
+    setBusy(kind);
+    try {
+      const res = await api.post<Omit<OwnerCredentials, 'title'>>(`/admin/tenants/${tenantId}/owner/${kind === 'invite' ? 'invite' : 'reset-password'}`);
+      setCreds({ title: kind === 'invite' ? 'New invitation link' : 'Password reset', ...res });
+      await qc.invalidateQueries({ queryKey: ['admin', 'tenant', tenantId] });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
+      setConfirmReset(false);
+    }
+  };
+  return (
+    <Card data-testid="tenant-owners">
+      <CardHeader title="Owner" />
+      <CardContent className="space-y-3 text-sm">
+        {owners.map((o) => (
+          <div key={o.id}>
+            <p className="font-medium">{o.name} {o.status === 'INVITED' && <Badge tone="amber">Invited</Badge>}{o.status === 'DISABLED' && <Badge tone="gray">Disabled</Badge>}</p>
+            <p className="text-xs text-slate-500">{o.email ?? o.phone} · last login {o.lastLoginAt ? ago(o.lastLoginAt) : 'never'}</p>
+          </div>
+        ))}
+        {owners.length > 0 && (
+          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+            {invited && <Button size="sm" variant="outline" loading={busy === 'invite'} onClick={() => run('invite')}>Resend invitation</Button>}
+            <Button size="sm" variant="outline" loading={busy === 'reset'} onClick={() => setConfirmReset(true)}>Reset password</Button>
+          </div>
+        )}
+      </CardContent>
+      {confirmReset && (
+        <Modal open onClose={() => setConfirmReset(false)} size="sm" title="Reset the owner's password?" description="A new temporary password is created and the owner is signed out of every device."
+          footer={<><Button variant="outline" onClick={() => setConfirmReset(false)}>Cancel</Button><Button variant="danger" loading={busy === 'reset'} onClick={() => run('reset')}>Reset password</Button></>}>
+          <p className="text-sm text-slate-600">Share the new password with the owner securely.</p>
+        </Modal>
+      )}
+      {creds && <CredentialsDialog creds={creds} onClose={() => setCreds(null)} />}
+    </Card>
+  );
+}
+
 export default function AdminTenantPage() {
   const { id } = useParams<{ id: string }>();
   const { data: t, isLoading } = useQuery({ queryKey: ['admin', 'tenant', id], queryFn: () => api.get<TenantDetail>(`/admin/tenants/${id}`) });
@@ -239,14 +296,7 @@ export default function AdminTenantPage() {
           </Card>
         </div>
         <div className="space-y-5">
-          <Card>
-            <CardHeader title="Owners" />
-            <CardContent className="space-y-2 text-sm">
-              {t.owners.map((o) => (
-                <div key={o.id}><p className="font-medium">{o.name}</p><p className="text-xs text-slate-500">{o.email ?? o.phone} · last login {o.lastLoginAt ? ago(o.lastLoginAt) : 'never'}</p></div>
-              ))}
-            </CardContent>
-          </Card>
+          <OwnerAccess tenantId={t.id} owners={t.owners} />
           <Card>
             <CardHeader title="Branches" />
             <CardContent className="space-y-1.5 text-sm">

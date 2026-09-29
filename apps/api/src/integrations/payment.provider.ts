@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac, randomBytes } from 'crypto';
 import { safeEqual } from '../common/utils/crypto';
-import { env } from '../config/env';
 
 export interface CreateOrderResult {
   provider: string;
@@ -25,6 +24,8 @@ export interface ProviderSubscription {
 
 export abstract class PaymentProvider {
   abstract readonly name: string;
+  /** Public key identifying the gateway account (sent to checkout and stored on payments). */
+  abstract readonly keyId: string;
   abstract createOrder(amount: number, currency: string, receipt: string, notes?: Record<string, string>): Promise<CreateOrderResult>;
   abstract verifyPaymentSignature(orderId: string, paymentId: string, signature: string): boolean;
   abstract verifyWebhookSignature(rawBody: Buffer | string, signature: string | undefined): boolean;
@@ -38,10 +39,11 @@ export const hmacHex = (secret: string, data: string | Buffer) => createHmac('sh
 @Injectable()
 export class MockPaymentProvider extends PaymentProvider {
   readonly name = 'mock';
+  readonly keyId = 'rzp_test_mock';
   static readonly SECRET = 'mock_gateway_secret';
 
   async createOrder(amount: number, currency: string): Promise<CreateOrderResult> {
-    return { provider: this.name, orderId: `order_mock_${randomBytes(6).toString('hex')}`, amount, currency, keyId: 'rzp_test_mock' };
+    return { provider: this.name, orderId: `order_mock_${randomBytes(6).toString('hex')}`, amount, currency, keyId: this.keyId };
   }
   verifyPaymentSignature(orderId: string, paymentId: string, signature: string) {
     return safeEqual(hmacHex(MockPaymentProvider.SECRET, `${orderId}|${paymentId}`), signature);
@@ -57,21 +59,42 @@ export class MockPaymentProvider extends PaymentProvider {
   }
 }
 
-@Injectable()
+export interface RazorpayCredentials {
+  keyId: string;
+  keySecret: string;
+  webhookSecret?: string;
+}
+
+export const RAZORPAY_API = 'https://api.razorpay.com/v1';
+
 export class RazorpayPaymentProvider extends PaymentProvider {
   readonly name = 'razorpay';
+  constructor(private readonly creds: RazorpayCredentials) {
+    super();
+  }
 
-  private async call<T>(path: string, body: unknown): Promise<T> {
-    const e = env();
-    const auth = Buffer.from(`${e.RAZORPAY_KEY_ID}:${e.RAZORPAY_KEY_SECRET}`).toString('base64');
-    const res = await fetch(`https://api.razorpay.com/v1${path}`, {
-      method: 'POST',
-      headers: { authorization: `Basic ${auth}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+  get keyId() {
+    return this.creds.keyId;
+  }
+
+  private get auth() {
+    return `Basic ${Buffer.from(`${this.creds.keyId}:${this.creds.keySecret}`).toString('base64')}`;
+  }
+
+  private async call<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
+    const res = await fetch(`${RAZORPAY_API}${path}`, {
+      method,
+      headers: { authorization: this.auth, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     const json = (await res.json()) as T & { error?: { description: string } };
     if (!res.ok) throw new Error(json.error?.description ?? `Razorpay HTTP ${res.status}`);
     return json;
+  }
+
+  /** Cheap authenticated call used by the settings "Test" button. */
+  async ping() {
+    await this.call('/payments?count=1', undefined, 'GET');
   }
 
   async createOrder(amount: number, currency: string, receipt: string, notes?: Record<string, string>) {
@@ -81,15 +104,15 @@ export class RazorpayPaymentProvider extends PaymentProvider {
       receipt: receipt.slice(0, 40),
       notes,
     });
-    return { provider: this.name, orderId: order.id, amount, currency: order.currency, keyId: env().RAZORPAY_KEY_ID };
+    return { provider: this.name, orderId: order.id, amount, currency: order.currency, keyId: this.creds.keyId };
   }
 
   verifyPaymentSignature(orderId: string, paymentId: string, signature: string) {
-    return safeEqual(hmacHex(env().RAZORPAY_KEY_SECRET ?? '', `${orderId}|${paymentId}`), signature);
+    return safeEqual(hmacHex(this.creds.keySecret, `${orderId}|${paymentId}`), signature);
   }
 
   verifyWebhookSignature(rawBody: Buffer | string, signature: string | undefined) {
-    const secret = env().RAZORPAY_WEBHOOK_SECRET;
+    const secret = this.creds.webhookSecret;
     return !!signature && !!secret && safeEqual(hmacHex(secret, rawBody), signature);
   }
 

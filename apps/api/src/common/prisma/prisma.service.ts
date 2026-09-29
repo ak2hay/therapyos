@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { RequestContext } from '../context/request-context';
 
 /** Models that carry `tenantId` but must not be auto-scoped (they hold platform-wide defaults). */
-const UNSCOPED = new Set(['FeatureFlag', 'NotificationTemplate', 'DomainEvent']);
+const UNSCOPED = new Set(['FeatureFlag', 'NotificationTemplate', 'DomainEvent', 'IntegrationConfig']);
 
 export const TENANT_MODELS = new Set(
   Prisma.dmmf.datamodel.models

@@ -14,6 +14,7 @@ import { AuditService } from '../../core/audit.service';
 import { DomainEvents, EventsService } from '../../core/events.service';
 import { SettingsService } from '../../core/settings.service';
 import { hmacHex, MockPaymentProvider, PaymentProvider } from '../../integrations/payment.provider';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { RealtimeService } from '../../realtime/realtime.gateway';
 import { LedgerService } from '../ledger/ledger.service';
 import { maskContact } from '../customers/customers.service';
@@ -41,7 +42,7 @@ export class PaymentsService {
     @InjectDb() private readonly db: Db,
     private readonly invoices: InvoicesService,
     private readonly ledger: LedgerService,
-    private readonly provider: PaymentProvider,
+    private readonly providers: ProviderFactory,
     private readonly settings: SettingsService,
     private readonly activity: ActivityService,
     private readonly audit: AuditService,
@@ -131,6 +132,11 @@ export class PaymentsService {
 
   // ---------- payment gateway ----------
 
+  /** The gateway account that created this payment's order. */
+  private gatewayFor(p: { tenantId: string; gatewayKeyId: string | null; provider: string | null }): Promise<PaymentProvider> {
+    return this.providers.paymentsForKey(p.tenantId, p.gatewayKeyId, p.provider);
+  }
+
   async createOrder(invoiceId: string, amount?: number) {
     const tenantId = RequestContext.requireTenantId();
     const inv = await this.invoices.get(invoiceId);
@@ -138,14 +144,27 @@ export class PaymentsService {
     const balance = round2(num(inv.total) - num(inv.amountPaid));
     const value = round2(amount ?? balance);
     if (value <= 0 || value > balance + 0.001) throw AppError.badRequest(ErrorCode.PAYMENT_EXCEEDS_BALANCE, `Amount must be between 1 and the balance due of ${balance.toFixed(2)}.`);
+    const gateway = await this.providers.payments(tenantId);
     let order;
     try {
-      order = await this.provider.createOrder(value, inv.currency, inv.invoiceNumber, { invoiceId, tenantId });
+      order = await gateway.createOrder(value, inv.currency, inv.invoiceNumber, { invoiceId, tenantId });
     } catch (e) {
       throw AppError.badRequest(ErrorCode.PROVIDER_ERROR, `Payment gateway error: ${(e as Error).message}`);
     }
     const payment = await this.db.payment.create({
-      data: { tenantId, branchId: inv.branchId, invoiceId, customerId: inv.customerId, amount: value, method: 'RAZORPAY', provider: order.provider, providerOrderId: order.orderId, status: 'PENDING', receivedBy: RequestContext.userId ?? null },
+      data: {
+        tenantId,
+        branchId: inv.branchId,
+        invoiceId,
+        customerId: inv.customerId,
+        amount: value,
+        method: 'RAZORPAY',
+        provider: order.provider,
+        providerOrderId: order.orderId,
+        gatewayKeyId: gateway.keyId,
+        status: 'PENDING',
+        receivedBy: RequestContext.userId ?? null,
+      },
     });
     return {
       paymentId: payment.id,
@@ -156,7 +175,7 @@ export class PaymentsService {
       amountMinor: Math.round(value * 100),
       currency: order.currency,
       invoiceNumber: inv.invoiceNumber,
-      mock: this.provider.name === 'mock',
+      mock: gateway.name === 'mock',
       prefill: inv.customer ? { name: inv.customer.name, contact: inv.customer.phone, email: inv.customer.email } : undefined,
     };
   }
@@ -165,7 +184,8 @@ export class PaymentsService {
     const payment = await this.db.payment.findFirst({ where: { providerOrderId: input.razorpay_order_id } });
     if (!payment) throw AppError.notFound('Payment order');
     RequestContext.assertBranch(payment.branchId);
-    if (!this.provider.verifyPaymentSignature(input.razorpay_order_id, input.razorpay_payment_id, input.razorpay_signature)) {
+    const gateway = await this.gatewayFor(payment);
+    if (!gateway.verifyPaymentSignature(input.razorpay_order_id, input.razorpay_payment_id, input.razorpay_signature)) {
       await this.db.payment.updateMany({ where: { id: payment.id, status: 'PENDING' }, data: { status: 'FAILED', notes: 'Signature verification failed' } });
       throw AppError.badRequest(ErrorCode.PAYMENT_FAILED, 'Payment could not be verified. No money has been recorded.');
     }
@@ -176,9 +196,9 @@ export class PaymentsService {
 
   /** Development helper: completes a mock-gateway order as if the customer paid in the checkout popup. */
   async mockComplete(paymentId: string) {
-    if (this.provider.name !== 'mock') throw AppError.forbidden('Mock payments are only available with the mock gateway.');
     const p = await this.db.payment.findFirst({ where: { id: paymentId } });
     if (!p || !p.providerOrderId) throw AppError.notFound('Payment order');
+    if ((await this.gatewayFor(p)).name !== 'mock') throw AppError.forbidden('Mock payments are only available with the mock gateway.');
     const paymentRef = `pay_mock_${p.id.slice(-10)}`;
     return this.verify({ razorpay_order_id: p.providerOrderId, razorpay_payment_id: paymentRef, razorpay_signature: hmacHex(MockPaymentProvider.SECRET, `${p.providerOrderId}|${paymentRef}`) });
   }
@@ -204,13 +224,20 @@ export class PaymentsService {
    * tenant, so the payment is found by its gateway order id and processed in its tenant.
    */
   async webhook(rawBody: Buffer | undefined, signature: string | undefined, body: any) {
-    if (!rawBody || !this.provider.verifyWebhookSignature(rawBody, signature)) {
+    const event: string = body?.event ?? '';
+    const paymentEntity = body?.payload?.payment?.entity ?? {};
+    const refundEntity = body?.payload?.refund?.entity ?? {};
+    // Businesses may use their own Razorpay account, so the secret depends on which order the event is for.
+    // Nothing is changed before the signature is verified.
+    const payment = paymentEntity.order_id ? await this.db.payment.findFirst({ where: { providerOrderId: paymentEntity.order_id } }) : null;
+    const refund = refundEntity.id ? await this.db.refund.findFirst({ where: { providerRefundId: refundEntity.id }, include: { payment: true } }) : null;
+    const owner = payment ?? refund?.payment ?? null;
+    const gateway = owner ? await this.gatewayFor(owner) : await this.providers.payments(null);
+    if (!rawBody || !gateway.verifyWebhookSignature(rawBody, signature)) {
       throw AppError.badRequest(ErrorCode.WEBHOOK_SIGNATURE_INVALID, 'Invalid webhook signature.');
     }
-    const event: string = body?.event ?? '';
     if (event === 'payment.captured' || event === 'order.paid' || event === 'payment.failed') {
-      const entity = body?.payload?.payment?.entity ?? {};
-      const payment = entity.order_id ? await this.db.payment.findFirst({ where: { providerOrderId: entity.order_id } }) : null;
+      const entity = paymentEntity;
       if (!payment) return { received: true, ignored: 'unknown order' };
       return RequestContext.runAsTenant(payment.tenantId, async () => {
         if (event === 'payment.failed') {
@@ -223,8 +250,7 @@ export class PaymentsService {
       });
     }
     if (event === 'refund.processed' || event === 'refund.failed') {
-      const entity = body?.payload?.refund?.entity ?? {};
-      const refund = entity.id ? await this.db.refund.findFirst({ where: { providerRefundId: entity.id } }) : null;
+      const entity = refundEntity;
       if (!refund) return { received: true, ignored: 'unknown refund' };
       await this.db.refund.update({ where: { id: refund.id }, data: { status: event === 'refund.processed' ? 'SUCCESS' : 'FAILED' } });
       if (event === 'refund.failed') this.logger.error(`Gateway refund ${entity.id} failed for invoice ${refund.invoiceId}; follow up manually.`);
@@ -247,7 +273,7 @@ export class PaymentsService {
     let status: 'SUCCESS' | 'PENDING' = 'SUCCESS';
     if (p.method === 'RAZORPAY' && p.providerTransactionId) {
       try {
-        const r = await this.provider.refund(p.providerTransactionId, input.amount);
+        const r = await (await this.gatewayFor(p)).refund(p.providerTransactionId, input.amount);
         if (r.status === 'FAILED') throw new Error('Gateway rejected the refund');
         providerRefundId = r.refundId;
         status = r.status;

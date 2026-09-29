@@ -10,7 +10,8 @@ import { Db, InjectDb } from '../../common/prisma/prisma.service';
 import { Zod } from '../../common/pipes/zod.pipe';
 import { paged } from '../../common/utils/pagination';
 import { SettingsService } from '../../core/settings.service';
-import { LlmProvider, MockLlmProvider } from '../../integrations/llm.provider';
+import { MockLlmProvider } from '../../integrations/llm.provider';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { HqModule } from '../hq/hq.module';
 import { resolvePeriod } from './ai-period';
 import { AiContext, AiIntent, AiResult, AiToolsService } from './ai-tools.service';
@@ -58,7 +59,7 @@ export class AiService {
   constructor(
     @InjectDb() private readonly db: Db,
     private readonly tools: AiToolsService,
-    private readonly llm: LlmProvider,
+    private readonly providers: ProviderFactory,
     private readonly settings: SettingsService,
   ) {}
 
@@ -117,15 +118,16 @@ export class AiService {
       'Answer the owner in 3 to 6 short bullet points using ONLY the numbers in the business data provided. Never estimate, extrapolate or invent figures, names or causes that are not in the data.',
       'If the data does not answer the question, say so plainly. Amounts are in ' + ctx.currency + '. Finish with one practical next step that follows from the data.',
     ].join(' ');
+    const llm = await this.providers.llm();
     let answer: string;
-    let provider = this.llm.name;
+    let provider = llm.name;
     try {
-      answer = (await this.llm.answer({ system, user: q.question, facts })).trim();
+      answer = (await llm.answer({ system, user: q.question, facts })).trim();
       if (!answer) throw new Error('empty answer');
     } catch (err) {
-      this.logger.warn(`LLM provider ${this.llm.name} failed, using the grounded summary: ${(err as Error).message}`);
+      this.logger.warn(`LLM provider ${llm.name} failed, using the grounded summary: ${(err as Error).message}`);
       answer = await this.fallback.answer({ system, user: q.question, facts });
-      provider = `${this.llm.name}:fallback`;
+      provider = `${llm.name}:fallback`;
     }
     const stored = { intent, title: result.title, headline: result.headline, insights: result.insights, period: result.period, table: result.table, heatmap: result.heatmap, actions: result.actions, metrics: result.metrics };
     const row = await this.db.aiQuery.create({

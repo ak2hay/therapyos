@@ -10,7 +10,8 @@ import { env } from '../../config/env';
 import { AuditService } from '../../core/audit.service';
 import { AuthzService } from '../../core/authz.service';
 import { FeaturesService } from '../../core/features.service';
-import { PaymentProvider } from '../../integrations/payment.provider';
+import { PlatformSettingsService } from '../../integrations/platform-settings.service';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { NotificationsService } from '../notifications/notifications.service';
 
 const DAY = 86_400_000;
@@ -34,9 +35,25 @@ export class SubscriptionService {
     private readonly features: FeaturesService,
     private readonly authz: AuthzService,
     private readonly audit: AuditService,
-    private readonly provider: PaymentProvider,
+    private readonly providers: ProviderFactory,
+    private readonly platform: PlatformSettingsService,
     private readonly notifications: NotificationsService,
   ) {}
+
+  /** SaaS subscriptions are always billed to the platform's own Razorpay account. */
+  private gateway() {
+    return this.providers.payments(null);
+  }
+
+  private planRef(plan: { code: string; providerPlanIds: unknown }, cycle: BillingCycle): string | undefined {
+    const own = (plan.providerPlanIds ?? {}) as Record<string, string | undefined>;
+    if (own[cycle]) return own[cycle];
+    try {
+      return (JSON.parse(env().RAZORPAY_PLAN_MAP) as Record<string, string>)[`${plan.code}:${cycle}`];
+    } catch {
+      return undefined;
+    }
+  }
 
   private current(tenantId: string) {
     return this.db.tenantSubscription.findFirst({ where: { tenantId, isCurrent: true }, include: { plan: true } });
@@ -54,7 +71,8 @@ export class SubscriptionService {
       this.db.tenantSubscription.findFirst({ where: { tenantId, isCurrent: false, provider: 'razorpay', status: 'TRIALING', createdAt: { gte: new Date(Date.now() - DAY) } }, include: { plan: true }, orderBy: { createdAt: 'desc' } }),
     ]);
     const trialDaysLeft = subscription?.status === 'TRIALING' && subscription.trialEndDate ? Math.max(0, Math.ceil((subscription.trialEndDate.getTime() - Date.now()) / DAY)) : null;
-    return { subscription, trialDaysLeft, plans, invoices, limits, usage, features, pendingChange: pending ? { plan: pending.plan, billingCycle: pending.billingCycle } : null, provider: this.provider.name };
+    const provider = (await this.gateway()).name;
+    return { subscription, trialDaysLeft, plans: plans.map(({ providerPlanIds: _ids, ...p }) => p), invoices, limits, usage, features, pendingChange: pending ? { plan: pending.plan, billingCycle: pending.billingCycle } : null, provider };
   }
 
   private async assertFits(tenantId: string, plan: { name: string; maxBranches: number; maxUsers: number; maxCustomers: number }) {
@@ -83,10 +101,11 @@ export class SubscriptionService {
     }
     await this.assertFits(tenantId, plan);
 
-    if (this.provider.name === 'razorpay') {
-      const planRef = (JSON.parse(env().RAZORPAY_PLAN_MAP) as Record<string, string>)[`${plan.code}:${billingCycle}`];
+    const gateway = await this.gateway();
+    if (gateway.name === 'razorpay') {
+      const planRef = this.planRef(plan, billingCycle);
       if (!planRef) throw AppError.invalidState(`Online payment is not configured for ${plan.name} (${billingCycle.toLowerCase()}). Contact support.`);
-      const gw = await this.provider.createSubscription(planRef, billingCycle === 'ANNUAL' ? 10 : 120, { tenantId, planCode: plan.code });
+      const gw = await gateway.createSubscription(planRef, billingCycle === 'ANNUAL' ? 10 : 120, { tenantId, planCode: plan.code });
       await this.db.tenantSubscription.create({
         data: { tenantId, planId, billingCycle, status: 'TRIALING', isCurrent: false, provider: 'razorpay', providerSubscriptionId: gw.subscriptionId },
       });
@@ -94,7 +113,7 @@ export class SubscriptionService {
       return { status: 'PENDING_PAYMENT', checkoutUrl: gw.shortUrl ?? null };
     }
 
-    const sub = await this.activate(tenantId, planId, billingCycle, { provider: this.provider.name, providerSubscriptionId: (await this.provider.createSubscription(plan.code, 1)).subscriptionId, charge: true });
+    const sub = await this.activate(tenantId, planId, billingCycle, { provider: gateway.name, providerSubscriptionId: (await gateway.createSubscription(plan.code, 1)).subscriptionId, charge: true });
     await this.audit.log({ action: 'SUBSCRIPTION_CHANGED', entityType: 'TenantSubscription', entityId: sub.id, oldValues: current ? { plan: current.plan.code, billingCycle: current.billingCycle, status: current.status } : null, newValues: { plan: plan.code, billingCycle } });
     return { status: 'ACTIVE', subscription: sub };
   }
@@ -147,7 +166,7 @@ export class SubscriptionService {
 
   /** Razorpay subscription webhooks (signature-verified). Subscriptions are found by gateway id. */
   async webhook(rawBody: Buffer | undefined, signature: string | undefined, body: any) {
-    if (!rawBody || !this.provider.verifyWebhookSignature(rawBody, signature)) {
+    if (!rawBody || !(await this.gateway()).verifyWebhookSignature(rawBody, signature)) {
       throw AppError.badRequest(ErrorCode.WEBHOOK_SIGNATURE_INVALID, 'Invalid webhook signature.');
     }
     const event: string = body?.event ?? '';
@@ -200,7 +219,8 @@ export class SubscriptionService {
    * past-due grace period and suspension. Every transition is guarded so reruns are no-ops.
    */
   async lifecycle(now = new Date()) {
-    const grace = env().SUBSCRIPTION_GRACE_DAYS * DAY;
+    const graceDays = (await this.platform.get()).subscriptionGraceDays;
+    const grace = graceDays * DAY;
     const result = { trialReminders: 0, trialsEnded: 0, renewed: 0, pastDue: 0, suspended: 0, ended: 0 };
     const subs = await this.db.tenantSubscription.findMany({ where: { isCurrent: true, status: { in: ['TRIALING', 'ACTIVE', 'PAST_DUE'] } }, include: { plan: true } });
     for (const s of subs) {
@@ -223,7 +243,7 @@ export class SubscriptionService {
         }
         if (s.status === 'TRIALING') {
           await this.db.tenantSubscription.updateMany({ where: { id: s.id, status: 'TRIALING' }, data: { status: 'PAST_DUE' } });
-          await this.alertOwners(s.tenantId, 'Your free trial has ended', `Pick a plan within ${env().SUBSCRIPTION_GRACE_DAYS} days to keep your account active.`, `TRIAL_ENDED:${s.id}`);
+          await this.alertOwners(s.tenantId, 'Your free trial has ended', `Pick a plan within ${graceDays} days to keep your account active.`, `TRIAL_ENDED:${s.id}`);
           result.trialsEnded++;
           continue;
         }

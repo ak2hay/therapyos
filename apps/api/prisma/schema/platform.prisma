@@ -234,6 +234,38 @@ model FeatureFlag {
   @@map("feature_flags")
 }
 
+enum IntegrationProvider {
+  RAZORPAY
+  MSG91
+  WHATSAPP_CLOUD
+  SMTP
+  OPENAI
+}
+
+/// Provider credentials. `tenantId = null` holds the platform (Rkyves) defaults; `secrets` is AES-GCM sealed JSON.
+model IntegrationConfig {
+  id        String              @id @default(cuid())
+  tenantId  String?
+  provider  IntegrationProvider
+  enabled   Boolean             @default(true)
+  config    Json                @default("{}")
+  secrets   String?
+  updatedBy String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@unique([tenantId, provider])
+  @@map("integration_configs")
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
 enum TaxType {
   GST
   VAT

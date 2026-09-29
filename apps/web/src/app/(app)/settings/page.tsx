@@ -34,8 +34,9 @@ import { hasPermission, refreshSession, useAuth } from '@/lib/auth-store';
 import { fmtDateTime, titleCase } from '@/lib/format';
 import { BrandingTab, DeveloperTab, SubscriptionTab } from './extra-tabs';
 import { NotificationsTab } from './notifications-tab';
+import { IntegrationsPanel } from '@/components/integrations-panel';
 
-type TabKey = 'business' | 'operations' | 'tax' | 'features' | 'notifications' | 'subscription' | 'branding' | 'developer' | 'audit';
+type TabKey = 'business' | 'operations' | 'tax' | 'features' | 'notifications' | 'integrations' | 'subscription' | 'branding' | 'developer' | 'audit';
 
 interface Tenant {
   name: string;
@@ -363,7 +364,7 @@ function AuditTab() {
   );
 }
 
-const TAB_KEYS: TabKey[] = ['business', 'operations', 'tax', 'features', 'notifications', 'subscription', 'branding', 'developer', 'audit'];
+const TAB_KEYS: TabKey[] = ['business', 'operations', 'tax', 'features', 'notifications', 'integrations', 'subscription', 'branding', 'developer', 'audit'];
 
 export default function SettingsPage() {
   return (
@@ -383,6 +384,7 @@ function SettingsInner() {
     { value: 'tax', label: 'Tax rates', show: true },
     { value: 'features', label: 'Plan & modules', show: true },
     { value: 'notifications', label: 'Notifications', show: hasPermission(user, PERMISSIONS.NOTIFICATION_MANAGE) },
+    { value: 'integrations', label: 'Integrations', show: hasPermission(user, PERMISSIONS.SETTINGS_MANAGE) },
     { value: 'subscription', label: 'Subscription', show: hasPermission(user, PERMISSIONS.SUBSCRIPTION_MANAGE) },
     { value: 'branding', label: 'Branding', show: hasPermission(user, PERMISSIONS.BRANDING_MANAGE) },
     { value: 'developer', label: 'API keys', show: hasPermission(user, PERMISSIONS.API_KEY_MANAGE) },
@@ -399,6 +401,15 @@ function SettingsInner() {
       {tab === 'tax' && <TaxTab canEdit={canSettings} />}
       {tab === 'features' && <FeaturesTab canEdit={canSettings} />}
       {tab === 'notifications' && <NotificationsTab />}
+      {tab === 'integrations' && (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Payments, SMS, WhatsApp and email work out of the box through Rkyves. Connect your own accounts here to collect payments directly
+            into your Razorpay account or send messages under your own sender ID. Keys are encrypted and never shown again.
+          </p>
+          <IntegrationsPanel scope="tenant" />
+        </div>
+      )}
       {tab === 'subscription' && <SubscriptionTab />}
       {tab === 'branding' && <BrandingTab />}
       {tab === 'developer' && <DeveloperTab />}

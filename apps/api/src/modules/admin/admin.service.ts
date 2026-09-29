@@ -15,6 +15,7 @@ import { AuditService } from '../../core/audit.service';
 import { AuthzService } from '../../core/authz.service';
 import { FeaturesService } from '../../core/features.service';
 import { QUEUES, QueueName, QueueService } from '../../jobs/queue.service';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { StorageService } from '../../integrations/storage.service';
 import { LAPSED_REASON, planPrice, SubscriptionService } from '../subscription/subscription.service';
 
@@ -36,6 +37,7 @@ export class AdminService {
     private readonly subscriptions: SubscriptionService,
     private readonly queues: QueueService,
     private readonly storage: StorageService,
+    private readonly providers: ProviderFactory,
   ) {}
 
   // ---------- metrics ----------
@@ -152,7 +154,7 @@ export class AdminService {
       this.features.getFeatures(id),
       this.db.featureFlag.findMany({ where: { tenantId: id } }),
       this.db.branch.findMany({ where: { tenantId: id }, select: { id: true, name: true, code: true, city: true, status: true }, orderBy: { name: 'asc' } }),
-      this.db.user.findMany({ where: { tenantId: id, userRoles: { some: { role: { key: 'OWNER' } } } }, select: { id: true, name: true, email: true, phone: true, lastLoginAt: true } }),
+      this.db.user.findMany({ where: { tenantId: id, userRoles: { some: { role: { key: 'OWNER' } } } }, select: { id: true, name: true, email: true, phone: true, status: true, lastLoginAt: true } }),
       this.db.auditLog.findMany({ where: { tenantId: id }, orderBy: { createdAt: 'desc' }, take: 15, select: { id: true, action: true, entityType: true, actorType: true, createdAt: true } }),
       this.db.supportTicket.findMany({ where: { tenantId: id }, orderBy: { updatedAt: 'desc' }, take: 5, select: { id: true, subject: true, status: true, priority: true, updatedAt: true } }),
       this.db.payment.aggregate({ where: { tenantId: id, status: { in: [...PAID] }, paidAt: { gte: d30 } }, _sum: { amount: true } }),
@@ -316,6 +318,8 @@ export class AdminService {
     ]);
     const mem = process.memoryUsage();
     const e = env();
+    const sources = await this.providers.sources(null);
+    const label = (name: string, source: string) => (source === 'mock' ? 'mock' : `${name} (${source === 'env' ? 'server env' : 'platform'})`);
     return {
       checkedAt: new Date(),
       services: { database, redis, storage: { status: 'up' as const, driver: this.storage.driver } },
@@ -328,7 +332,14 @@ export class AdminService {
       notificationsLast24h: Object.fromEntries(notifications.map((n) => [n.status, n._count._all])),
       pastDueSubscriptions: lifecycle,
       process: { uptimeSeconds: Math.round(process.uptime()), rssMb: Math.round(mem.rss / 1_048_576), heapUsedMb: Math.round(mem.heapUsed / 1_048_576), node: process.version, pid: process.pid, env: e.NODE_ENV },
-      providers: { payment: e.PAYMENT_PROVIDER, sms: e.SMS_PROVIDER, email: e.EMAIL_PROVIDER, whatsapp: e.WHATSAPP_PROVIDER, llm: e.LLM_PROVIDER, storage: e.STORAGE_DRIVER },
+      providers: {
+        payment: label('razorpay', sources.RAZORPAY),
+        sms: label('msg91', sources.MSG91),
+        email: label('smtp', sources.SMTP),
+        whatsapp: label('cloud', sources.WHATSAPP_CLOUD),
+        llm: label('openai', sources.OPENAI),
+        storage: e.STORAGE_DRIVER,
+      },
     };
   }
 

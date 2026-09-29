@@ -116,6 +116,7 @@ model SubscriptionPlan {
   maxUsers     Int
   maxCustomers Int
   features     String[]     @default([])
+  providerPlanIds Json?
   status       RecordStatus @default(ACTIVE)
   sortOrder    Int          @default(0)
   createdAt    DateTime     @default(now())

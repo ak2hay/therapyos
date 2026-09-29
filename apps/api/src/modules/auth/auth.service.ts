@@ -10,6 +10,7 @@ import { ErrorCode } from '../../common/errors/error-codes';
 import { AuditService } from '../../core/audit.service';
 import { AuthzService } from '../../core/authz.service';
 import { FeaturesService } from '../../core/features.service';
+import { PlatformSettingsService } from '../../integrations/platform-settings.service';
 import { hashPassword, ProvisioningService } from '../tenants/provisioning.service';
 import { OtpService } from './otp.service';
 import { sha256, TokenService } from './token.service';
@@ -28,11 +29,15 @@ export class AuthService {
     private readonly authz: AuthzService,
     private readonly features: FeaturesService,
     private readonly audit: AuditService,
+    private readonly platform: PlatformSettingsService,
   ) {
     if (env().GOOGLE_CLIENT_ID) this.google = new OAuth2Client(env().GOOGLE_CLIENT_ID);
   }
 
   async register(input: RegisterInput) {
+    if (!(await this.platform.get()).allowSelfSignup) {
+      throw new AppError(ErrorCode.SIGNUP_DISABLED, 'New sign-ups are closed. Contact us and we will set up your account.', HttpStatus.FORBIDDEN);
+    }
     const exists = await this.db.user.findFirst({ where: { OR: [{ email: input.email }, { phone: input.phone }] } });
     if (exists) {
       throw AppError.conflict('An account with this email or phone already exists. Please sign in instead.', ErrorCode.DUPLICATE);

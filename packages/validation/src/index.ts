@@ -7,3 +7,4 @@ export * from './billing';
 export * from './management';
 export * from './growth';
 export * from './portal';
+export * from './integrations';

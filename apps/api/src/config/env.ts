@@ -14,6 +14,8 @@ const schema = z.object({
   DATABASE_URL: z.string(),
   REDIS_URL: z.string().default('redis://localhost:6380'),
   JWT_ACCESS_SECRET: z.string().min(16),
+  /** Encrypts integration secrets stored in the database (32-byte hex/base64 or a long passphrase). */
+  SETTINGS_ENCRYPTION_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(30),
   RUN_WORKER_IN_API: bool,
@@ -64,6 +66,9 @@ const schema = z.object({
 }).superRefine((e, ctx) => {
   if (e.NODE_ENV === 'production' && e.JWT_ACCESS_SECRET.length < 32) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JWT_ACCESS_SECRET'], message: 'must be at least 32 characters in production' });
+  }
+  if (e.NODE_ENV === 'production' && !e.SETTINGS_ENCRYPTION_KEY) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['SETTINGS_ENCRYPTION_KEY'], message: 'is required in production' });
   }
 });
 

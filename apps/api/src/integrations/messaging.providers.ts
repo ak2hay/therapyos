@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import nodemailer, { Transporter } from 'nodemailer';
-import { env } from '../config/env';
 
 export interface SendResult {
   provider: string;
@@ -9,14 +8,28 @@ export interface SendResult {
   error?: string;
 }
 
+export interface SmsOptions {
+  /** Provider template (MSG91 flow / DLT) id; falls back to the provider default. */
+  templateId?: string | null;
+  /** Positional variables in placeholder order. */
+  params?: string[];
+  /** Set for login codes so the provider can use its OTP template. */
+  otp?: string;
+}
+
 export abstract class SmsProvider {
   abstract readonly name: string;
-  abstract send(to: string, body: string): Promise<SendResult>;
+  abstract send(to: string, body: string, opts?: SmsOptions): Promise<SendResult>;
+}
+
+export interface EmailOptions {
+  fromName?: string;
+  fromAddress?: string;
 }
 
 export abstract class EmailProvider {
   abstract readonly name: string;
-  abstract send(to: string, subject: string, html: string, opts?: { fromName?: string; fromAddress?: string }): Promise<SendResult>;
+  abstract send(to: string, subject: string, html: string, opts?: EmailOptions): Promise<SendResult>;
 }
 
 export interface WhatsAppMessage {
@@ -55,42 +68,88 @@ export class MockSmsProvider extends SmsProvider {
   }
 }
 
-@Injectable()
+export interface Msg91Credentials {
+  authKey: string;
+  senderId?: string;
+  otpTemplateId?: string;
+  defaultTemplateId?: string;
+}
+
+/** MSG91 wants digits with the country code; bare 10-digit numbers are Indian. */
+function msg91Mobile(to: string) {
+  const digits = to.replace(/\D/g, '');
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith('0')) return `91${digits.slice(1)}`;
+  return digits;
+}
+
+/** MSG91 Flow API: Indian SMS must use a DLT-approved template, so free text is never sent. */
 export class Msg91SmsProvider extends SmsProvider {
   readonly name = 'msg91';
-  async send(to: string, body: string): Promise<SendResult> {
+  constructor(private readonly creds: Msg91Credentials) {
+    super();
+  }
+
+  static payload(creds: Msg91Credentials, to: string, opts: SmsOptions = {}) {
+    const templateId = (opts.otp ? creds.otpTemplateId : opts.templateId) || creds.defaultTemplateId;
+    if (!templateId) return null;
+    const vars: Record<string, string> = {};
+    const params = opts.otp ? [opts.otp] : (opts.params ?? []);
+    params.forEach((v, i) => (vars[`var${i + 1}`] = v));
+    if (opts.otp) vars.otp = opts.otp;
+    return {
+      template_id: templateId,
+      ...(creds.senderId ? { sender: creds.senderId } : {}),
+      short_url: '0',
+      recipients: [{ mobiles: msg91Mobile(to), ...vars }],
+    };
+  }
+
+  async send(to: string, _body: string, opts: SmsOptions = {}): Promise<SendResult> {
+    const payload = Msg91SmsProvider.payload(this.creds, to, opts);
+    if (!payload) return { provider: this.name, status: 'FAILED', error: 'No MSG91 flow template ID configured for this message' };
     try {
-      const res = await fetch('https://control.msg91.com/api/v5/flow/', {
+      const res = await fetch('https://control.msg91.com/api/v5/flow', {
         method: 'POST',
-        headers: { authkey: env().SMS_API_KEY ?? '', 'content-type': 'application/json' },
-        body: JSON.stringify({ sender: env().SMS_SENDER_ID, mobiles: to.replace(/^\+/, ''), message: body }),
+        headers: { authkey: this.creds.authKey, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) return { provider: this.name, status: 'FAILED', error: `HTTP ${res.status}` };
-      const json = (await res.json()) as { request_id?: string };
-      return { provider: this.name, status: 'SENT', messageId: json.request_id };
+      const json = (await res.json().catch(() => ({}))) as { type?: string; message?: string; request_id?: string };
+      if (!res.ok || json.type === 'error') return { provider: this.name, status: 'FAILED', error: json.message ?? `HTTP ${res.status}` };
+      return { provider: this.name, status: 'SENT', messageId: json.request_id ?? json.message };
     } catch (e) {
       return { provider: this.name, status: 'FAILED', error: (e as Error).message };
     }
   }
 }
 
-@Injectable()
+export interface SmtpCredentials {
+  host: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  fromAddress: string;
+  fromName?: string;
+}
+
 export class SmtpEmailProvider extends EmailProvider {
   readonly name = 'smtp';
-  private transporter: Transporter;
-  constructor() {
+  readonly transporter: Transporter;
+  constructor(private readonly creds: SmtpCredentials) {
     super();
-    const e = env();
     this.transporter = nodemailer.createTransport({
-      host: e.SMTP_HOST,
-      port: e.SMTP_PORT ?? 587,
-      secure: e.SMTP_PORT === 465,
-      auth: e.SMTP_USER ? { user: e.SMTP_USER, pass: e.SMTP_PASS } : undefined,
+      host: creds.host,
+      port: creds.port,
+      secure: creds.port === 465,
+      auth: creds.user ? { user: creds.user, pass: creds.pass } : undefined,
     });
   }
-  async send(to: string, subject: string, html: string, opts?: { fromName?: string; fromAddress?: string }) {
+  private defaultFrom() {
+    return this.creds.fromName ? `${this.creds.fromName} <${this.creds.fromAddress}>` : this.creds.fromAddress;
+  }
+  async send(to: string, subject: string, html: string, opts?: EmailOptions) {
     try {
-      const from = opts?.fromAddress ? `${opts.fromName ?? 'TherapyOS'} <${opts.fromAddress}>` : env().EMAIL_FROM;
+      const from = opts?.fromAddress ? `${opts.fromName ?? this.creds.fromName ?? 'TherapyOS'} <${opts.fromAddress}>` : this.defaultFrom();
       const info = await this.transporter.sendMail({ from, to, subject, html });
       return { provider: this.name, status: 'SENT' as const, messageId: info.messageId };
     } catch (e) {
@@ -121,12 +180,21 @@ export class MockWhatsAppProvider extends WhatsAppProvider {
   }
 }
 
+export interface WhatsAppCredentials {
+  phoneNumberId: string;
+  accessToken: string;
+  defaultLanguage?: string;
+}
+
+export const GRAPH_URL = 'https://graph.facebook.com/v21.0';
+
 /** WhatsApp Business Cloud API (Meta Graph). Uses approved templates when provided, text otherwise. */
-@Injectable()
 export class CloudWhatsAppProvider extends WhatsAppProvider {
   readonly name = 'whatsapp-cloud';
+  constructor(private readonly creds: WhatsAppCredentials) {
+    super();
+  }
   async send(msg: WhatsAppMessage): Promise<SendResult> {
-    const e = env();
     const payload = msg.templateName
       ? {
           messaging_product: 'whatsapp',
@@ -134,7 +202,7 @@ export class CloudWhatsAppProvider extends WhatsAppProvider {
           type: 'template',
           template: {
             name: msg.templateName,
-            language: { code: msg.language ?? 'en' },
+            language: { code: msg.language ?? this.creds.defaultLanguage ?? 'en' },
             components: msg.templateParams?.length
               ? [{ type: 'body', parameters: msg.templateParams.map((text) => ({ type: 'text', text })) }]
               : undefined,
@@ -142,9 +210,9 @@ export class CloudWhatsAppProvider extends WhatsAppProvider {
         }
       : { messaging_product: 'whatsapp', to: msg.to.replace(/^\+/, ''), type: 'text', text: { body: msg.body } };
     try {
-      const res = await fetch(`https://graph.facebook.com/v21.0/${e.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+      const res = await fetch(`${GRAPH_URL}/${this.creds.phoneNumberId}/messages`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${e.WHATSAPP_ACCESS_TOKEN}`, 'content-type': 'application/json' },
+        headers: { authorization: `Bearer ${this.creds.accessToken}`, 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = (await res.json()) as { messages?: { id: string }[]; error?: { message: string } };

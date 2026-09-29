@@ -129,7 +129,7 @@ export class NotificationsController {
     }
     if (body.channel === 'EMAIL' && !body.subject) throw AppError.validation('Email templates need a subject.', { fields: { subject: 'Required for email' } });
     const existing = await this.db.notificationTemplate.findFirst({ where: { tenantId, event: body.event, channel: body.channel as NotificationChannel, language: body.language } });
-    const data = { name: body.name, subject: body.subject ?? null, body: body.body, whatsappTemplateName: body.whatsappTemplateName ?? null, isActive: body.isActive };
+    const data = { name: body.name, subject: body.subject ?? null, body: body.body, whatsappTemplateName: body.whatsappTemplateName ?? null, smsTemplateId: body.channel === 'SMS' ? (body.smsTemplateId ?? null) : null, isActive: body.isActive };
     const row = existing
       ? await this.db.notificationTemplate.update({ where: { id: existing.id }, data })
       : await this.db.notificationTemplate.create({ data: { ...data, tenantId, event: body.event, channel: body.channel as NotificationChannel, language: body.language } });

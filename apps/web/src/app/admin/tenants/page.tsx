@@ -2,9 +2,10 @@
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { Suspense, useEffect, useState } from 'react';
-import { Badge, Card, EmptyState, Input, LoadingBlock, PageHeader, Pagination, Select, Table, TBody, TD, TH, THead, TR } from '@therapyos/ui';
+import { NewBusinessModal } from '@/components/admin-onboarding';
+import { Badge, Button, Card, EmptyState, Input, LoadingBlock, PageHeader, Pagination, Select, Table, TBody, TD, TH, THead, TR } from '@therapyos/ui';
 import { api } from '@/lib/api';
 import { ago, fmtDate, titleCase } from '@/lib/format';
 
@@ -32,6 +33,7 @@ function TenantsInner() {
   const [search, setSearch] = useState(params.get('search') ?? '');
   const [debounced, setDebounced] = useState(search);
   const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 300);
     return () => clearTimeout(t);
@@ -50,7 +52,8 @@ function TenantsInner() {
   });
   return (
     <div className="space-y-5">
-      <PageHeader title="Businesses" description="Every tenant on the platform, with plan, usage and activity." />
+      <PageHeader title="Businesses" description="Every tenant on the platform, with plan, usage and activity." actions={<Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New business</Button>} />
+      {creating && <NewBusinessModal onClose={() => setCreating(false)} />}
       <Card className="flex flex-wrap items-center gap-2 p-3">
         <div className="relative min-w-[16rem] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />

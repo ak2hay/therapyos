@@ -86,13 +86,14 @@ The API validates its environment at start-up (`apps/api/src/config/env.ts`) and
 | `JWT_ACCESS_TTL_SECONDS` / `REFRESH_TOKEN_TTL_DAYS` | `900` / `30` | Token lifetimes |
 | `RUN_WORKER_IN_API` | `false` | Run BullMQ workers inside the API process |
 | `STORAGE_DRIVER`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_FORCE_PATH_STYLE` | `local` | File storage (invoices, exports, logos) |
-| `EMAIL_PROVIDER`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` | `mock` | Email delivery |
-| `SMS_PROVIDER`, `SMS_API_KEY`, `SMS_SENDER_ID` | `mock` | SMS delivery (`msg91`, `twilio`) |
-| `WHATSAPP_PROVIDER`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` | `mock` | WhatsApp Cloud API (outbound messages) |
-| `PAYMENT_PROVIDER`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PLAN_MAP` | `mock` | Payments and SaaS subscriptions |
-| `SUBSCRIPTION_GRACE_DAYS` | `7` | Days a lapsed subscription keeps working |
+| `SETTINGS_ENCRYPTION_KEY` | - (required in production) | AES-256-GCM key for integration secrets saved in the database (`openssl rand -hex 32`). Back it up and never change it once keys are saved |
+| `EMAIL_PROVIDER`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM` | `mock` | Email delivery (fallback when not set in the admin console) |
+| `SMS_PROVIDER`, `SMS_API_KEY`, `SMS_SENDER_ID` | `mock` | SMS delivery (`msg91`) (fallback) |
+| `WHATSAPP_PROVIDER`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN` | `mock` | WhatsApp Cloud API (fallback) |
+| `PAYMENT_PROVIDER`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PLAN_MAP` | `mock` | Payments and SaaS subscriptions (fallback; plan ids can also be set per plan in the console) |
+| `SUBSCRIPTION_GRACE_DAYS` | `7` | Default grace period (overridden by Platform settings) |
 | `GOOGLE_CLIENT_ID` | - | Enables Google sign-in |
-| `LLM_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL` | `mock` | AI business assistant |
+| `LLM_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL` | `mock` | AI business assistant (fallback) |
 | `LOG_LEVEL` | `info` | Pino log level |
 | `SENTRY_DSN` | - | Error reporting |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | - | OpenTelemetry tracing (install the optional `@opentelemetry/*` packages) |
@@ -101,6 +102,18 @@ The API validates its environment at start-up (`apps/api/src/config/env.ts`) and
 | `TRUST_PROXY` | `1` | Reverse-proxy hops in front of the API |
 | `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` | - | Seeds the first super-admin |
 | `BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` | `admin` / - | Queue dashboard credentials (disabled in production without a password) |
+
+### Integration keys and platform settings
+
+Provider keys are normally managed in the app rather than in environment variables:
+
+- **Super admin > Integrations** holds the platform keys for Razorpay, MSG91, WhatsApp Cloud API, SMTP and OpenAI. Each card has a *Test connection* button and shows the webhook URLs to register in Razorpay.
+- **Settings > Integrations** (clinic owners, `settings.manage`) lets a business use its own Razorpay, MSG91, WhatsApp or SMTP account instead of the platform one. OpenAI and SaaS subscription billing always use the platform account.
+- Credentials resolve in this order: the business's own keys (when enabled), then the platform keys, then the environment variables above, then the mock provider. Changes apply to every API and worker process within seconds.
+- Secrets are encrypted with `SETTINGS_ENCRYPTION_KEY`, never returned by the API (only `****last4`), and never written to the audit log.
+- Indian SMS must use DLT templates: set the MSG91 OTP and fallback flow IDs on the MSG91 card, and a flow template ID per SMS template in Settings > Notifications. Placeholders are sent as `##var1##`, `##var2##`... in the order they first appear.
+- **Super admin > Platform settings** controls the platform name, support contacts, whether self sign-up is open, the trial plan and length, the grace period and defaults for new businesses.
+- **Super admin > Tenants > New business** onboards a client manually: it creates the business, the owner login (email invitation or a temporary password shown once) and a trial or offline-paid subscription. The owner completes the setup wizard on first sign-in. The tenant page can resend the invitation or reset the owner's password.
 
 The web app reads `API_URL` (where `/api/v1` is proxied; baked in at build time), `APP_URL`, `PLATFORM_HOSTS` (host names that are not tenant subdomains) and optionally `NEXT_PUBLIC_WS_URL`.
 

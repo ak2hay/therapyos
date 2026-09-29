@@ -11,6 +11,7 @@ export const notificationTemplateSchema = z.object({
   subject: emptyToUndefined(z.string().max(200)),
   body: z.string().min(1).max(4000),
   whatsappTemplateName: emptyToUndefined(z.string().max(120)),
+  smsTemplateId: emptyToUndefined(z.string().max(60)),
   language: z.string().max(10).default('en'),
   isActive: z.boolean().default(true),
 });
@@ -138,6 +139,10 @@ export const subscriptionPlanSchema = z.object({
   features: z.array(z.string()).default([]),
   status: recordStatus.default('ACTIVE'),
   sortOrder: z.coerce.number().int().default(0),
+  /** Razorpay plan ids (plan_...) per billing cycle, used for online subscription checkout. */
+  providerPlanIds: z
+    .object({ MONTHLY: emptyToUndefined(z.string().max(60)), ANNUAL: emptyToUndefined(z.string().max(60)) })
+    .optional(),
 });
 
 export const changePlanSchema = z.object({

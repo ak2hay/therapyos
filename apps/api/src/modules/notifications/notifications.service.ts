@@ -8,7 +8,8 @@ import { env } from '../../config/env';
 import { AuthzService } from '../../core/authz.service';
 import { FeaturesService } from '../../core/features.service';
 import { SettingsService } from '../../core/settings.service';
-import { EmailProvider, SendResult, SmsProvider, WhatsAppProvider } from '../../integrations/messaging.providers';
+import { SendResult } from '../../integrations/messaging.providers';
+import { ProviderFactory } from '../../integrations/provider.factory';
 import { bullConnection, QUEUES, QueueService, shouldRunWorkers } from '../../jobs/queue.service';
 import { jobCounter } from '../../observability/observability';
 import { RealtimeService } from '../../realtime/realtime.gateway';
@@ -48,6 +49,7 @@ interface DeliveryJob {
   logId: string;
   tenantId: string | null;
   whatsappTemplateName?: string | null;
+  smsTemplateId?: string | null;
   templateParams?: string[];
 }
 
@@ -56,6 +58,7 @@ interface TemplateRow {
   subject: string | null;
   body: string;
   whatsappTemplateName: string | null;
+  smsTemplateId: string | null;
   isActive: boolean;
 }
 
@@ -71,9 +74,7 @@ export class NotificationsService implements OnApplicationBootstrap, OnModuleDes
     private readonly authz: AuthzService,
     private readonly queues: QueueService,
     private readonly realtime: RealtimeService,
-    private readonly sms: SmsProvider,
-    private readonly email: EmailProvider,
-    private readonly whatsapp: WhatsAppProvider,
+    private readonly providers: ProviderFactory,
   ) {}
 
   onApplicationBootstrap() {
@@ -231,8 +232,15 @@ export class NotificationsService implements OnApplicationBootstrap, OnModuleDes
         continue;
       }
       const text = htmlToText(renderTemplate(bodySource, allVars));
-      const templateName = target === 'WHATSAPP' && !opts.bodyOverride ? tpl?.whatsappTemplateName : null;
-      await record(target, 'QUEUED', { recipient: customer.phone, body: text }, templateName ? { whatsappTemplateName: templateName, templateParams: templateParams(bodySource, allVars) } : undefined);
+      let job: Omit<DeliveryJob, 'logId' | 'tenantId'> | undefined;
+      if (target === 'WHATSAPP' && !opts.bodyOverride && tpl?.whatsappTemplateName) {
+        job = { whatsappTemplateName: tpl.whatsappTemplateName, templateParams: templateParams(bodySource, allVars) };
+      } else if (target === 'SMS' && !opts.bodyOverride) {
+        // DLT templates are registered against the SMS copy, so the variables come from that template.
+        const smsTpl = tpl?.channel === 'SMS' ? tpl : templates.get('SMS');
+        if (smsTpl?.smsTemplateId) job = { smsTemplateId: smsTpl.smsTemplateId, templateParams: templateParams(smsTpl.body, allVars) };
+      }
+      await record(target, 'QUEUED', { recipient: customer.phone, body: text }, job);
     }
     return { queued, skipped };
   }
@@ -279,12 +287,12 @@ export class NotificationsService implements OnApplicationBootstrap, OnModuleDes
   private async send(channel: Channel, to: string, body: string, subject: string | null, tenantId: string | null, job: Partial<DeliveryJob>): Promise<SendResult> {
     switch (channel) {
       case 'SMS':
-        return this.sms.send(to, body);
+        return (await this.providers.sms(tenantId)).send(to, body, { templateId: job.smsTemplateId, params: job.templateParams });
       case 'WHATSAPP':
-        return this.whatsapp.send({ to, body, templateName: job.whatsappTemplateName ?? undefined, templateParams: job.templateParams });
+        return (await this.providers.whatsapp(tenantId)).send({ to, body, templateName: job.whatsappTemplateName ?? undefined, templateParams: job.templateParams });
       case 'EMAIL': {
         const branding = tenantId ? await this.db.tenantBranding.findUnique({ where: { tenantId }, select: { emailSenderName: true, emailSenderAddress: true, appName: true } }) : null;
-        return this.email.send(to, subject ?? 'Notification', emailLayout(body, branding?.appName ?? null), {
+        return (await this.providers.email(tenantId)).send(to, subject ?? 'Notification', emailLayout(body, branding?.appName ?? null), {
           fromName: branding?.emailSenderName ?? branding?.appName ?? undefined,
           fromAddress: branding?.emailSenderAddress ?? undefined,
         });
@@ -304,7 +312,8 @@ export class NotificationsService implements OnApplicationBootstrap, OnModuleDes
     const log = await this.db.notificationLog.create({
       data: { tenantId, userId: RequestContext.userId ?? null, event, channel, recipient: to, subject, body: body, status: 'QUEUED', refType: 'TEST' },
     });
-    await this.deliver({ logId: log.id, tenantId });
+    const smsTemplate = channel === 'SMS' && tpl.channel === 'SMS' && tpl.smsTemplateId ? { smsTemplateId: tpl.smsTemplateId, templateParams: templateParams(tpl.body, allVars) } : {};
+    await this.deliver({ logId: log.id, tenantId, ...smsTemplate });
     return this.db.notificationLog.findUnique({ where: { id: log.id } });
   }
 
